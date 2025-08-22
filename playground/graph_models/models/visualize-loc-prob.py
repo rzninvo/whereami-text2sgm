@@ -16,9 +16,26 @@ For every ScanScribe caption graph:
       • full 3-D mesh with matched objects bright and camera spheres whose
         colour encodes probability (optional, Open3D).
 
-Author: VLN
+
+
+Adds a second 2-D plot: a quiver of *weighted arrows* whose:
+  • direction = average of casted ray directions (unit vectors) that fit in a
+    camera FOV window (H×V) which *maximizes* the number of visible objects.
+  • size     = that maximal count (scaled).
+                
+
+Author: Shak
 
 python visualize-loc-prob.py     --root  /home/klrshak/work/VisionLang/3RScan/data/3RScan     --graphs /home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/processed_data --top_k 5 --show_heatmap --show_3d
+
+New CLI flags:
+  --show_arrows         Show weighted-arrow (quiver) plot
+  --h_fov_deg 100       Horizontal FOV (degrees)
+  --v_fov_deg 60        Vertical FOV (degrees)
+  --arrow_stride 2      Plot every Nth grid camera (reduce clutter)
+  --arrow_len 0.0       Max arrow length in metres (0 → 0.9*grid_step)
+
+The rest of the pipeline (heatmap, Open3D) is unchanged.
 """
 
 from __future__ import annotations
@@ -33,17 +50,18 @@ import open3d as o3d
 import open3d.core as o3c
 
 # --------------------------------------------------------------------------- #
-#  Repo imports (same trick as visualization_graph-object.py)                 #
+#  Repo imports                                                               #
 # --------------------------------------------------------------------------- #
 
-sys.path.append('../data_processing') # sys.path.append('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_processing')
-sys.path.append('../../../') # sys.path.append('/home/julia/Documents/h_coarse_loc/')
+sys.path.append('../data_processing')
+sys.path.append('../../../')
 
 from scene_graph import SceneGraph                    # noqa: E402
 from data_distribution_analysis.helper import get_matching_subgraph  # noqa: E402
 
+
 # ════════════════════════════════════════════════════════════════════════════
-#  Utility: load mesh + obj↔face maps (verbatim copy, trimmed)               ═
+#  Utility: load mesh + obj↔face maps                                         ═
 # ════════════════════════════════════════════════════════════════════════════
 def load_scene(scan_dir: Path):
     """Return (legacy mesh, faces→object-id array, obj→faces dict)."""
@@ -117,7 +135,7 @@ def sample_grid(verts: np.ndarray, step: float, z_eye: float = 1.6):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Visibility test (single ray)                                               ═
+#  Ray-visibility test (single ray)                                           ═
 # ════════════════════════════════════════════════════════════════════════════
 def first_hit_is_object(cam: np.ndarray, centre: np.ndarray, target_oid: int,
                         rc: o3d.t.geometry.RaycastingScene,
@@ -135,7 +153,7 @@ def first_hit_is_object(cam: np.ndarray, centre: np.ndarray, target_oid: int,
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Colour helpers for visualising                                             ═
+#  Colour helpers                                                             ═
 # ════════════════════════════════════════════════════════════════════════════
 def colour_objects(mesh: o3d.geometry.TriangleMesh,
                    obj2faces: dict[int, np.ndarray],
@@ -154,8 +172,91 @@ def colour_objects(mesh: o3d.geometry.TriangleMesh,
 
 def colormap(vals: np.ndarray):
     """Map values in [0,1] → RGB using matplotlib’s 'hot'."""
-    cmap = plt.get_cmap("hot")
+    cmap = plt.get_cmap("viridis")
     return cmap(vals)[:, :3]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  New: angular utilities + FOV maximisation                                  ═
+# ════════════════════════════════════════════════════════════════════════════
+def dir_to_yaw_pitch(v: np.ndarray):
+    """Return yaw (around +Z, from +X toward +Y) and pitch (up) in radians."""
+    x, y, z = float(v[0]), float(v[1]), float(v[2])
+    yaw = math.atan2(y, x)
+    pitch = math.atan2(z, math.hypot(x, y))
+    return yaw, pitch
+
+
+def best_fov_window(yaws: np.ndarray,
+                    pitches: np.ndarray,
+                    hfov: float, vfov: float):
+    """
+    Given arrays of angles (rad), find subset that maximises count inside an
+    axis-aligned yaw×pitch window of size hfov×vfov. Handles yaw wrap-around.
+    Returns (selected_indices, max_count).
+    """
+    n = len(yaws)
+    if n == 0:
+        return np.array([], dtype=int), 0
+
+    order = np.argsort(yaws)
+    yaw_sorted = yaws[order]
+    pit_sorted = pitches[order]
+    idx_sorted = order
+
+    yaw_ext = np.concatenate([yaw_sorted, yaw_sorted + 2 * math.pi])
+    pit_ext = np.concatenate([pit_sorted, pit_sorted])
+    idx_ext = np.concatenate([idx_sorted, idx_sorted])
+
+    best_cnt = 0
+    best_sel = np.array([], dtype=int)
+
+    j = 0
+    for s in range(n):
+        y0 = yaw_ext[s]
+        y1 = y0 + hfov
+        j = max(j, s)
+        while j < s + n and yaw_ext[j] <= y1 + 1e-9:
+            j += 1
+
+        if j <= s:
+            continue
+
+        # candidates within horizontal window
+        cand_slice = slice(s, j)
+        ps = pit_ext[cand_slice]
+        ids = idx_ext[cand_slice]
+
+        # 1D sliding window on pitch
+        p_order = np.argsort(ps)
+        ps = ps[p_order]
+        ids = ids[p_order]
+
+        t_end = 0
+        for t_start in range(len(ps)):
+            p0 = ps[t_start]
+            p1 = p0 + vfov
+            while t_end < len(ps) and ps[t_end] <= p1 + 1e-9:
+                t_end += 1
+            cnt = t_end - t_start
+            if cnt > best_cnt:
+                best_cnt = cnt
+                best_sel = np.unique(ids[t_start:t_end])
+
+        # (implicit: move to next s)
+
+    return best_sel, int(best_cnt)
+
+
+def average_direction(unit_dirs: np.ndarray, sel: np.ndarray):
+    """Vector-average the selected unit directions; return unit 3D vector or None."""
+    if sel.size == 0:
+        return None
+    m = unit_dirs[sel].mean(axis=0)
+    n = np.linalg.norm(m)
+    if n < 1e-8:
+        return None
+    return m / n
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -164,7 +265,7 @@ def colormap(vals: np.ndarray):
 def main():
     parser = argparse.ArgumentParser(
         description="Compute and visualise localisation probability surface "
-                    "for ScanScribe captions.")
+                    "for ScanScribe captions, plus FOV-weighted arrow field.")
     parser.add_argument("--root", required=True,
                         help="Parent folder of 3RScan/<scan_id>/")
     parser.add_argument("--graphs", required=True,
@@ -179,6 +280,19 @@ def main():
                         help="Show 2-D Matplotlib heat-map")
     parser.add_argument("--show_3d", action="store_true",
                         help="Open Open3D viewer with mesh + probability spheres")
+
+    # New: arrows / FOV options
+    parser.add_argument("--show_arrows", action="store_true",
+                        help="Show FOV-weighted arrow (quiver) plot")
+    parser.add_argument("--h_fov_deg", type=float, default=100.0,
+                        help="Horizontal FOV in degrees")
+    parser.add_argument("--v_fov_deg", type=float, default=60.0,
+                        help="Vertical FOV in degrees")
+    parser.add_argument("--arrow_stride", type=int, default=2,
+                        help="Plot every Nth grid camera (reduce clutter)")
+    parser.add_argument("--arrow_len", type=float, default=0.0,
+                        help="Max arrow length in metres (0 → 0.9*grid_step)")
+
     args = parser.parse_args()
 
     # ----- quick summary of chosen arguments
@@ -229,23 +343,37 @@ def main():
 
         verts = np.asarray(mesh.vertices)
         cams  = sample_grid(verts, step=args.grid_step)
+        # Recompute gx/gy to know grid dimensions (match sample_grid logic)
+        xs, ys = verts[:, 0], verts[:, 1]
+        gx = np.arange(xs.min(), xs.max() + 1e-4, args.grid_step)
+        gy = np.arange(ys.min(), ys.max() + 1e-4, args.grid_step)
+        Nx, Ny = len(gx), len(gy)
+
         print(f"[{qi}] {sid}: grid {len(cams):,} pts  |  {len(obj_ids)} objs")
 
         # object centroids
         tris = np.asarray(mesh.triangles)
         centroids = {}
         for oid in obj_ids:
-            faces = obj2faces.get(oid)                # <- changed
-            if faces is not None and len(faces):      # <- changed
+            faces = obj2faces.get(oid)
+            if faces is not None and len(faces):
                 centroids[oid] = verts[np.unique(tris[faces].ravel())].mean(0)
 
+        if not centroids:
+            print("    no centroids for matched objects — skipped\n")
+            continue
 
-        # visibility
-        scores = np.zeros(len(cams), dtype=np.int32)
+        # ---- visibility + per-cam direction list (reuses single ray cast)
+        visible_dirs = [[] for _ in range(len(cams))]
         for idx, cam in enumerate(cams):
             for oid, cen in centroids.items():
                 if first_hit_is_object(cam, cen, oid, rc, tri2obj):
-                    scores[idx] += 1
+                    d = cen - cam
+                    l = np.linalg.norm(d)
+                    if l > 1e-6:
+                        visible_dirs[idx].append(d / l)
+
+        scores = np.array([len(v) for v in visible_dirs], dtype=np.int32)
         if scores.sum() == 0:
             print("    none of the matched objects visible — skipped\n")
             continue
@@ -255,12 +383,80 @@ def main():
         if args.show_heatmap:
             plt.figure(figsize=(6, 6))
             sc = plt.scatter(cams[:, 0], cams[:, 1], c=probs,
-                             cmap="hot", s=12)
+                             cmap="viridis", s=12)
             plt.colorbar(sc, label="probability")
             plt.title(f"{sid}  –  grid {args.grid_step} m")
             plt.axis("equal")
             plt.tight_layout()
             plt.show()
+
+        # --- New: weighted arrow plot (quiver) -----------------------------
+        if args.show_arrows:
+            hfov = math.radians(args.h_fov_deg)
+            vfov = math.radians(args.v_fov_deg)
+            max_len = (0.9 * args.grid_step) if args.arrow_len <= 0 else args.arrow_len
+
+            # Prepare arrays for quiver
+            Qx, Qy, U, V, W = [], [], [], [], []  # positions, vectors, weights
+            max_score = 0
+
+            # Iterate subset of grid in a structured way using Nx,Ny
+            stride = max(1, int(args.arrow_stride))
+            for gy_i in range(0, Ny, stride):
+                for gx_i in range(0, Nx, stride):
+                    idx = gy_i * Nx + gx_i
+                    dirs = np.asarray(visible_dirs[idx], dtype=np.float32)
+                    if dirs.size == 0:
+                        continue
+
+                    # Yaw/pitch arrays
+                    yaws = np.empty(len(dirs), dtype=np.float32)
+                    pits = np.empty(len(dirs), dtype=np.float32)
+                    for i, v in enumerate(dirs):
+                        y, p = dir_to_yaw_pitch(v)
+                        yaws[i] = y
+                        pits[i] = p
+
+                    sel, count = best_fov_window(yaws, pits, hfov, vfov)
+                    if count == 0:
+                        continue
+
+                    mdir = average_direction(dirs, sel)
+                    if mdir is None:
+                        continue
+
+                    # Project to XY for arrow direction
+                    xy = mdir[:2]
+                    nxy = np.linalg.norm(xy)
+                    if nxy < 1e-8:
+                        continue
+                    xy_unit = xy / nxy
+
+                    max_score = max(max_score, count)
+                    Qx.append(cams[idx, 0])
+                    Qy.append(cams[idx, 1])
+                    U.append(float(xy_unit[0]))   # scaled later
+                    V.append(float(xy_unit[1]))
+                    W.append(count)
+
+            if len(W) == 0:
+                print("    arrows: no valid FOV windows — nothing to plot")
+            else:
+                W = np.array(W, dtype=np.float32)
+                scale_fac = np.where(W > 0, W / W.max(), 0.0)
+                U = np.array(U) * max_len * scale_fac
+                V = np.array(V) * max_len * scale_fac
+
+                plt.figure(figsize=(7, 7))
+                plt.quiver(Qx, Qy, U, V, W, angles="xy", scale_units="xy",
+                           scale=1.0, cmap="viridis", width=0.004,
+                           minlength=0.01)
+                plt.colorbar(label="max visible objects within FOV")
+                plt.title(f"{sid} – FOV-weighted average directions "
+                          f"(H={args.h_fov_deg}°, V={args.v_fov_deg}°, stride={stride})")
+                plt.axis("equal")
+                plt.tight_layout()
+                plt.show()
 
         # --- 3-D viewer
         if args.show_3d:

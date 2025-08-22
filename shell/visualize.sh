@@ -7,9 +7,14 @@ PROJECT_DIR="/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_mo
 # export PYTHONPATH=$PROJECT_DIR:$PYTHONPATH
 cd $PROJECT_DIR
 
-python visualization_graph-object.py \
-  --root /home/klrshak/work/VisionLang/3RScan/data/3RScan \
-  --graphs /home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/processed_data \
-  --ckpt ../model_checkpoints/graph2graph/model_NO_subg_100_epochs_entire_training_set_epoch_30_checkpoint.pt
-  #   --query-key 5341b7bf-8a66-2cdd-8794-026113b7c312 \
+# python visualization_graph-object.py \
+#   --root /home/klrshak/work/VisionLang/3RScan/data/3RScan \
+#   --graphs /home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/processed_data \
+#   --ckpt ../model_checkpoints/graph2graph/model_NO_subg_100_epochs_entire_training_set_epoch_30_checkpoint.pt
+#   --query-key 5341b7bf-8a66-2cdd-8794-026113b7c312 \
 
+python3 visualization_minimal.py \
+    --scan-id 095821f7-e2c2-2de1-9568-b9ce59920e29 \
+    --root /home/klrshak/work/VisionLang/3RScan/data/3RScan/ \
+    --graphs /home/klrshak/Downloads/3RScan-Test/graphs/ \
+    --ckpt  '/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/model_checkpoints/graph2graph/model_NO_subg_100_epochs_entire_training_set_epoch_30_checkpoint.pt'

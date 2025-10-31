@@ -183,6 +183,8 @@ def create_segment_visualizer(mesh: o3d.geometry.TriangleMesh,
             marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.04)
             marker.translate(centroid)
             marker.paint_uniform_color(np.asarray(colour))
+            if not marker.has_vertex_normals():
+                marker.compute_vertex_normals()
             vis.add_geometry(f"marker_{oid}", marker, material)
 
     vis.reset_camera_to_default()

@@ -646,10 +646,15 @@ def evaluate_scene(scene_id: str,
                     idx = stats.get("vertex_indices")
                     if idx is not None:
                         colours[idx] = np.clip(0.55 * colours[idx] + 0.45 * highlight, 0.0, 1.0)
+            mesh_vis.vertex_colors = o3d.utility.Vector3dVector(colours)
+            if not mesh_vis.has_vertex_normals():
+                mesh_vis.compute_vertex_normals()
         except Exception as exc:  # noqa: BLE001
             print(f"    [warn] Segment mesh loading failed ({exc}) — falling back to legacy mesh.")
             mesh_vis = colour_objects(mesh, obj2faces, obj_ids)
             obj_stats = []
+        if not mesh_vis.has_vertex_normals():
+            mesh_vis.compute_vertex_normals()
 
         from open3d.visualization import gui, rendering
 
@@ -688,17 +693,23 @@ def evaluate_scene(scene_id: str,
             s = o3d.geometry.TriangleMesh.create_sphere(radius=0.04)
             s.translate(point)
             s.paint_uniform_color(colour)
+            if not s.has_vertex_normals():
+                s.compute_vertex_normals()
             vis.add_geometry(f"prob_{idx_point}", s, prob_material)
 
         gt_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.1)
         gt_sphere.translate(gt_cam)
         gt_sphere.paint_uniform_color([1.0, 0.0, 0.0])
+        if not gt_sphere.has_vertex_normals():
+            gt_sphere.compute_vertex_normals()
         vis.add_geometry("gt_cam", gt_sphere, material)
         vis.add_3d_label(gt_cam, "GT")
 
         pred_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.085)
         pred_sphere.translate(pred_cam)
         pred_sphere.paint_uniform_color([1.0, 0.55, 0.0])
+        if not pred_sphere.has_vertex_normals():
+            pred_sphere.compute_vertex_normals()
         vis.add_geometry("pred_cam", pred_sphere, material)
         vis.add_3d_label(pred_cam, f"Pred ({pred_source})")
 

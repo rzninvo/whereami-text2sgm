@@ -46,6 +46,7 @@ sys.path.append("../../../")
 
 from scene_graph import SceneGraph  # noqa: E402
 from create_text_embeddings import create_embedding_nlp  # noqa: E402
+from visualize_3rscan_segments import build_segmented_mesh  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Import helpers from visualize_loc_prob.py (hyphenated filename)            #
@@ -291,6 +292,61 @@ def add_arrow_markers(gt_cam: np.ndarray,
     plt.legend(loc="best")
 
 
+def create_camera_frustum(center: np.ndarray,
+                          forward: Optional[np.ndarray],
+                          colour: Tuple[float, float, float],
+                          h_fov: float,
+                          v_fov: float,
+                          scale: float = 0.6) -> Optional[o3d.geometry.LineSet]:
+    """Return a simple line-based frustum; None if forward dir unavailable."""
+    if forward is None:
+        return None
+    fwd = np.asarray(forward, dtype=np.float64)
+    norm = np.linalg.norm(fwd)
+    if norm < 1e-6:
+        return None
+    fwd /= norm
+
+    up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    if abs(float(np.dot(fwd, up))) > 0.95:
+        up = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+    right = np.cross(fwd, up)
+    r_norm = np.linalg.norm(right)
+    if r_norm < 1e-6:
+        return None
+    right /= r_norm
+    up = np.cross(right, fwd)
+
+    depth = scale
+    half_w = math.tan(h_fov / 2.0) * depth
+    half_h = math.tan(v_fov / 2.0) * depth
+
+    centre = np.asarray(center, dtype=np.float64)
+    apex = centre
+    base = centre + fwd * depth
+
+    corners = [
+        base + right * half_w + up * half_h,
+        base - right * half_w + up * half_h,
+        base - right * half_w - up * half_h,
+        base + right * half_w - up * half_h,
+    ]
+
+    points = np.vstack([apex, *corners])
+    lines = np.array([
+        [0, 1], [0, 2], [0, 3], [0, 4],
+        [1, 2], [2, 3], [3, 4], [4, 1]
+    ], dtype=np.int32)
+
+    frustum = o3d.geometry.LineSet()
+    frustum.points = o3d.utility.Vector3dVector(points)
+    frustum.lines = o3d.utility.Vector2iVector(lines)
+    colours = np.tile(np.asarray(colour, dtype=np.float64), (lines.shape[0], 1))
+    frustum.colors = o3d.utility.Vector3dVector(colours)
+    return frustum
+
+
 # --------------------------------------------------------------------------- #
 # Main evaluation pipeline                                                   #
 # --------------------------------------------------------------------------- #
@@ -411,6 +467,10 @@ def evaluate_scene(scene_id: str,
         return None
 
     gt_cam = camera_center_from_pose(gt_pose)
+    pose_mat = np.asarray(gt_pose, dtype=np.float64)
+    rot_world_cam = pose_mat[:3, :3]
+    gt_dir_vec = rot_world_cam.T @ np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    gt_dir = gt_dir_vec / np.linalg.norm(gt_dir_vec) if np.linalg.norm(gt_dir_vec) > 1e-6 else None
 
     obj_ids = topk_matched_objects(caption_graph, scene_graph, k=args.top_k)
     if not obj_ids:
@@ -574,33 +634,98 @@ def evaluate_scene(scene_id: str,
             print("    [info] Arrow plot skipped (no valid FOV windows).")
 
     if args.show_3d:
-        vis_mesh = colour_objects(mesh, obj2faces, obj_ids)
-        spheres: List[o3d.geometry.TriangleMesh] = []
-        for point, colour in zip(cams, colormap(probs)):
-            s = o3d.geometry.TriangleMesh.create_sphere(radius=0.05)
+        matched_set: set[int] = {int(o) for o in obj_ids}
+        frustum_scale = max(args.grid_step * 3.0, 0.6)
+        try:
+            mesh_vis, obj_stats = build_segmented_mesh(scene_dir, seed=42)
+            colours = np.asarray(mesh_vis.vertex_colors)
+            highlight = np.array([1.0, 0.3, 0.3], dtype=np.float64)
+            for stats in obj_stats:
+                oid = int(stats["object_id"])
+                if oid in matched_set:
+                    idx = stats.get("vertex_indices")
+                    if idx is not None:
+                        colours[idx] = np.clip(0.55 * colours[idx] + 0.45 * highlight, 0.0, 1.0)
+        except Exception as exc:  # noqa: BLE001
+            print(f"    [warn] Segment mesh loading failed ({exc}) — falling back to legacy mesh.")
+            mesh_vis = colour_objects(mesh, obj2faces, obj_ids)
+            obj_stats = []
+
+        from open3d.visualization import gui, rendering
+
+        global GUI_INITIALISED
+        if not GUI_INITIALISED:
+            gui.Application.instance.initialize()
+            GUI_INITIALISED = True
+
+        vis = o3d.visualization.O3DVisualizer(f"{scene_id} – localisation eval", 1280, 800)
+        vis.show_settings = False
+
+        material = rendering.MaterialRecord()
+        material.shader = "defaultLit"
+        vis.add_geometry("mesh", mesh_vis, material)
+
+        text_added = set()
+        if obj_stats:
+            bbox_material = rendering.MaterialRecord()
+            bbox_material.shader = "unlitLine"
+            bbox_material.line_width = 1.5
+            for stats in obj_stats:
+                oid = int(stats["object_id"])
+                label = stats.get("label") or f"id_{oid}"
+                centroid = np.asarray(stats["centroid"]) if "centroid" in stats else None
+                if centroid is not None and tuple(centroid) not in text_added:
+                    vis.add_3d_label(centroid, f"{oid}: {label}")
+                    text_added.add(tuple(centroid))
+                if oid in matched_set and "bbox" in stats:
+                    vis.add_geometry(f"bbox_{oid}", stats["bbox"], bbox_material)
+
+        # Probability spheres
+        prob_material = rendering.MaterialRecord()
+        prob_material.shader = "defaultLit"
+        prob_material.base_color = [1.0, 1.0, 1.0, 1.0]
+        for idx_point, (point, colour) in enumerate(zip(cams, colormap(probs))):
+            s = o3d.geometry.TriangleMesh.create_sphere(radius=0.04)
             s.translate(point)
             s.paint_uniform_color(colour)
-            spheres.append(s)
+            vis.add_geometry(f"prob_{idx_point}", s, prob_material)
 
-        gt_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.12)
+        gt_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.1)
         gt_sphere.translate(gt_cam)
         gt_sphere.paint_uniform_color([1.0, 0.0, 0.0])
+        vis.add_geometry("gt_cam", gt_sphere, material)
+        vis.add_3d_label(gt_cam, "GT")
 
-        pred_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.09)
+        pred_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.085)
         pred_sphere.translate(pred_cam)
         pred_sphere.paint_uniform_color([1.0, 0.55, 0.0])
+        vis.add_geometry("pred_cam", pred_sphere, material)
+        vis.add_3d_label(pred_cam, f"Pred ({pred_source})")
 
-        vis = o3d.visualization.Visualizer()
-        vis.create_window(width=1280, height=800,
-                          window_name=f"{scene_id} – eval localisation")
-        vis.add_geometry(vis_mesh)
-        for s in spheres:
-            vis.add_geometry(s)
-        vis.add_geometry(gt_sphere)
-        vis.add_geometry(pred_sphere)
-        vis.get_render_option().point_size = 3
-        vis.run()
-        vis.destroy_window()
+        frustum_gt = create_camera_frustum(gt_cam, gt_dir,
+                                           colour=(1.0, 0.0, 0.0),
+                                           h_fov=math.radians(args.h_fov_deg),
+                                           v_fov=math.radians(args.v_fov_deg),
+                                           scale=frustum_scale)
+        frustum_pred = create_camera_frustum(pred_cam, pred_dir,
+                                             colour=(1.0, 0.6, 0.0),
+                                             h_fov=math.radians(args.h_fov_deg),
+                                             v_fov=math.radians(args.v_fov_deg),
+                                             scale=frustum_scale)
+        if frustum_gt is not None:
+            frustum_mat = rendering.MaterialRecord()
+            frustum_mat.shader = "unlitLine"
+            frustum_mat.line_width = 2.0
+            vis.add_geometry("frustum_gt", frustum_gt, frustum_mat)
+        if frustum_pred is not None:
+            frustum_mat_pred = rendering.MaterialRecord()
+            frustum_mat_pred.shader = "unlitLine"
+            frustum_mat_pred.line_width = 2.0
+            vis.add_geometry("frustum_pred", frustum_pred, frustum_mat_pred)
+
+        vis.reset_camera_to_default()
+        gui.Application.instance.add_window(vis)
+        gui.Application.instance.run()
 
     return metrics
 
@@ -692,6 +817,8 @@ def main() -> None:
         }, indent=2))
         print(f"Metrics saved to {args.save_metrics}")
 
+
+GUI_INITIALISED = False
 
 if __name__ == "__main__":
     main()

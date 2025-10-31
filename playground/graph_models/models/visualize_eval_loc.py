@@ -464,31 +464,17 @@ def evaluate_scene(scene_id: str,
     metrics.frame_id = str(frame.get("image_index", selection.path.name))
     metrics.matched_objects = len(obj_ids)
 
-    pred_cam = cams[pred_idx]
+    pred_cam_prob = cams[pred_idx]
 
-    if args.show_heatmap:
-        plt.figure(figsize=(6.5, 6.2))
-        sc = plt.scatter(cams[:, 0], cams[:, 1], c=probs,
-                         cmap="viridis", s=14)
-        plt.colorbar(sc, label="Probability")
-        plt.axis("equal")
-        plt.xlabel("X (m)")
-        plt.ylabel("Y (m)")
-        plt.title(f"{scene_id} · {metrics.frame_id} · grid {args.grid_step:.2f} m")
-        add_heatmap_markers(gt_cam, pred_cam)
-        plt.tight_layout()
-        plt.show()
+    # ---- Arrow-based aggregation (computed regardless of plotting)
+    arrow_positions: List[np.ndarray] = []
+    arrow_dirs: List[np.ndarray] = []
+    arrow_weights: List[float] = []
 
-    if args.show_arrows and dir_to_yaw_pitch and best_fov_window and average_direction:
+    have_arrow_helpers = bool(dir_to_yaw_pitch and best_fov_window and average_direction)
+    if have_arrow_helpers:
         hfov = math.radians(args.h_fov_deg)
         vfov = math.radians(args.v_fov_deg)
-        max_len = (0.9 * args.grid_step) if args.arrow_len <= 0 else args.arrow_len
-        Qx: List[float] = []
-        Qy: List[float] = []
-        U: List[float] = []
-        V: List[float] = []
-        W: List[float] = []
-
         stride = max(1, int(args.arrow_stride))
         for gy_i in range(0, Ny, stride):
             for gx_i in range(0, Nx, stride):
@@ -508,22 +494,69 @@ def evaluate_scene(scene_id: str,
                 mdir = average_direction(dirs, sel)  # type: ignore[arg-type]
                 if mdir is None:
                     continue
-                xy = mdir[:2]
-                nxy = np.linalg.norm(xy)
-                if nxy < 1e-8:
-                    continue
-                xy_unit = xy / nxy
-                Qx.append(float(cams[idx, 0]))
-                Qy.append(float(cams[idx, 1]))
-                U.append(float(xy_unit[0]))
-                V.append(float(xy_unit[1]))
-                W.append(float(count))
+                arrow_positions.append(cams[idx])
+                arrow_dirs.append(mdir)
+                arrow_weights.append(float(count))
 
-        if W:
-            W_np = np.asarray(W, dtype=np.float32)
+    pred_cam = pred_cam_prob
+    pred_dir: Optional[np.ndarray] = None
+    pred_source = "grid_probability"
+    if arrow_weights:
+        w_arr = np.asarray(arrow_weights, dtype=np.float32)
+        max_w = float(w_arr.max())
+        winners = [i for i, w in enumerate(arrow_weights)
+                   if math.isclose(w, max_w, rel_tol=1e-6, abs_tol=1e-6)]
+        winner_pos = np.stack([arrow_positions[i] for i in winners], axis=0)
+        pred_cam = winner_pos.mean(axis=0)
+
+        winner_dirs = np.stack([arrow_dirs[i] for i in winners], axis=0)
+        pred_dir = winner_dirs.mean(axis=0)
+        norm_dir = float(np.linalg.norm(pred_dir))
+        if norm_dir > 1e-6:
+            pred_dir /= norm_dir
+        else:
+            pred_dir = None
+        pred_source = "arrow_field"
+
+    metrics.distance_error = float(np.linalg.norm(pred_cam - gt_cam))
+
+    print(f"    predicted camera ({pred_source}): "
+          f"{pred_cam.tolist()}")
+    if pred_dir is not None:
+        print(f"    approx. viewing direction: {pred_dir.tolist()} \n")
+    else:
+        print()
+
+    if args.show_heatmap:
+        plt.figure(figsize=(6.5, 6.2))
+        sc = plt.scatter(cams[:, 0], cams[:, 1], c=probs,
+                         cmap="viridis", s=14)
+        plt.colorbar(sc, label="Probability")
+        plt.axis("equal")
+        plt.xlabel("X (m)")
+        plt.ylabel("Y (m)")
+        plt.title(f"{scene_id} · {metrics.frame_id} · grid {args.grid_step:.2f} m")
+        add_heatmap_markers(gt_cam, pred_cam,
+                            label_pred=f"Pred ({pred_source})")
+        plt.tight_layout()
+        plt.show()
+
+    if args.show_arrows:
+        if arrow_weights:
+            hfov = math.radians(args.h_fov_deg)
+            vfov = math.radians(args.v_fov_deg)
+            max_len = (0.9 * args.grid_step) if args.arrow_len <= 0 else args.arrow_len
+            W_np = np.asarray(arrow_weights, dtype=np.float32)
             scale = np.where(W_np > 0, W_np / W_np.max(), 0.0)
-            U_np = np.asarray(U) * max_len * scale
-            V_np = np.asarray(V) * max_len * scale
+            dirs_xy = np.asarray([d[:2] for d in arrow_dirs], dtype=np.float32)
+            norms = np.linalg.norm(dirs_xy, axis=1, keepdims=True)
+            norms = np.where(norms < 1e-8, 1.0, norms)
+            dirs_xy /= norms
+            U_np = dirs_xy[:, 0] * max_len * scale
+            V_np = dirs_xy[:, 1] * max_len * scale
+            Qx = [float(p[0]) for p in arrow_positions]
+            Qy = [float(p[1]) for p in arrow_positions]
+
             plt.figure(figsize=(7, 6.5))
             plt.quiver(Qx, Qy, U_np, V_np, W_np,
                        angles="xy", scale_units="xy", scale=1.0,
@@ -532,7 +565,8 @@ def evaluate_scene(scene_id: str,
             plt.axis("equal")
             plt.xlabel("X (m)")
             plt.ylabel("Y (m)")
-            plt.title(f"{scene_id} · {metrics.frame_id} · FOV arrows")
+            plt.title(f"{scene_id} · {metrics.frame_id} · FOV arrows "
+                      f"(H={math.degrees(hfov):.0f}°, V={math.degrees(vfov):.0f}°)")
             add_arrow_markers(gt_cam, pred_cam)
             plt.tight_layout()
             plt.show()

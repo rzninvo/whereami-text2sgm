@@ -1,0 +1,21 @@
+mode: standard              # standard | coarse_to_fine | candidates
+grid_step: 0.25
+eye_height: 1.6
+top_k: 25
+score_tau: 0.5
+h_fov_deg: 100.0
+v_fov_deg: 60.0
+prediction_strategy: weighted   # argmax | random | weighted
+cluster_bandwidth: 0.75
+max_cluster_points: 512
+hit_radii: [0.75, 1.0, 1.5, 2.0, 2.5]
+mass_percentiles: [50.0, 90.0]
+top_k_min_dist: 10
+frame_policy: max_visible
+frame_index: 0
+arrow_stride: 2
+arrow_len: 0.0
+top_pose_count: 5
+show_heatmap: false
+show_arrows: false
+show_3d: false

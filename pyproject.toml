@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whereami-text2sgm"
+version = "0.1.0"
+description = "Text-to-scene-graph matching for coarse indoor localisation"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "torch_geometric",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "spacy>=3.0",
+    "matplotlib",
+    "open3d",
+    "wandb",
+    "hydra-core>=1.3",
+    "omegaconf",
+    "tqdm",
+    "openai",
+    "tiktoken",
+    "transformers",
+    "plyfile",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["whereami*"]

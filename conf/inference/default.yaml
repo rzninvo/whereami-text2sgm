@@ -1,0 +1,6 @@
+top_k: 5
+jsonl_out: null
+embedding_type: word2vec    # word2vec | clip | ada
+query: null                 # for single_inference free-text
+api_key_file: null
+debug: false

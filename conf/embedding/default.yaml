@@ -1,0 +1,3 @@
+type: word2vec      # word2vec | clip | ada
+use_attributes: true
+max_dist: 1.0       # edge distance threshold for 3DSSG

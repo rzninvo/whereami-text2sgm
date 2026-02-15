@@ -40,11 +40,19 @@ whereami-text2sgm/
       timing.py                     # Timer utility
     analysis/                       # Subgraph matching & overlap analysis
       helper.py                     # DBSCAN-based subgraph extraction
-    visualization/                  # Localization & visualization scripts
-      visualize_loc_prob.py         # Dense grid localization probability
-      visualize_eval_loc.py         # Full localization evaluation + metrics
-      visualize_eval_loc_mk2.py     # Coarse-to-fine localization variant
-      visualize_eval_loc_candidates.py  # Export pose candidates to JSON
+    localization/                   # Dense-grid camera localization
+      __init__.py                   # Public API re-exports
+      grid.py                       # Grid sampling, raycasting, visibility
+      matching.py                   # Cosine-similarity Top-K matcher
+      frame_io.py                   # Frame JSON loading & caption graph building
+      prediction.py                 # Prediction strategies & candidate building
+      metrics.py                    # SceneMetrics, Hit@r, mass-radius, IoU
+      coarse_search.py              # Multi-level coarse-to-fine arrow search
+      visualization.py              # Colour maps, FOV geometry, plot helpers
+      evaluation.py                 # Unified evaluate_scene + run_evaluation
+      cli.py                        # Hydra CLI entry point
+    visualization/                  # Standalone visualization scripts
+      visualize_loc_prob.py         # Dense grid localization demo (thin wrapper)
       visualize_loc_from_query.py   # Free-text query localization
       visualize_3rscan_segments.py  # Segmented mesh builder/viewer
       visualization_graph_object.py # Matched scene/object visualiser
@@ -174,6 +182,30 @@ python -m whereami.models.single_inference \
 ```
 
 ### Localization
+
+Run the unified localization evaluation (standard, coarse-to-fine, or candidates mode):
+
+```bash
+# Standard mode (default)
+python -m whereami.localization.cli \
+    localization.root=$RSCAN_ROOT \
+    localization.graphs=$WHEREAMI_DATA_ROOT/processed_data
+
+# Coarse-to-fine mode
+python -m whereami.localization.cli \
+    localization.mode=coarse_to_fine \
+    localization.root=$RSCAN_ROOT \
+    localization.graphs=$WHEREAMI_DATA_ROOT/processed_data
+
+# Candidates export mode
+python -m whereami.localization.cli \
+    localization.mode=candidates \
+    localization.root=$RSCAN_ROOT \
+    localization.graphs=$WHEREAMI_DATA_ROOT/processed_data \
+    localization.output_json=./eval/candidates.json
+```
+
+Or use the helper script:
 
 ```bash
 bash scripts/visualize_eval_loc.sh

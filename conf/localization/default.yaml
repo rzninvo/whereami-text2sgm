@@ -19,3 +19,33 @@ top_pose_count: 5
 show_heatmap: false
 show_arrows: false
 show_3d: false
+
+# Scene data paths (required — override via CLI or environment)
+root: ${oc.env:RSCAN_ROOT}
+graphs: ${oc.env:WHEREAMI_DATA_ROOT}/processed_data
+query_root: null
+scene_ids: null
+seed: 0
+max_scenes: null
+visualize_scene: null
+
+# Simple-mode (coarse_to_fine) parameters
+prob_eps: 1.0e-6
+hit_radius: 0.5
+
+# Coarse-to-fine arrow search parameters
+coarse_grid_step: 2.0
+coarse_refine_levels: 3
+coarse_refine_factor: 2.0
+coarse_keep_ratio: 0.7
+coarse_top_k: 16
+coarse_disable_nms: false
+
+# Candidates-mode parameters
+top_candidates: 10
+top_pose_candidates: 10
+output_json: null
+
+# Output paths
+save_metrics: null
+log_file: null

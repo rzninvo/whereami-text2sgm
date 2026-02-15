@@ -44,14 +44,12 @@ from whereami.data_processing.scene_graph import SceneGraph
 from whereami.models.single_inference import text_to_scenegraph
 
 # --------------------------------------------------------------------------- #
-# Import helpers from visualize_loc_prob.py                                  #
+# Import helpers from whereami.localization                                  #
 # --------------------------------------------------------------------------- #
 
-from whereami.visualization.visualize_loc_prob import (
-    load_scene,
-    topk_matched_objects,
-    sample_grid,
-    first_hit_is_object,
+from whereami.localization.grid import load_scene, sample_grid, first_hit_is_object
+from whereami.localization.matching import topk_matched_objects
+from whereami.localization.visualization import (
     colour_objects,
     colormap,
     dir_to_yaw_pitch,

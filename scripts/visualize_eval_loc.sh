@@ -1,5 +1,5 @@
 #!/bin/bash
-# Helper script to run visualize_eval_loc.py with sensible defaults.
+# Helper script to run localization evaluation with sensible defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
@@ -19,26 +19,28 @@ SCENE_IDS=()
 
 # Additional CLI options (uncomment / edit as needed)
 EXTRA_ARGS=(
-  # --show_heatmap
-  # --show_arrows
-  # --show_3d
-  --save_metrics "./eval/eval_metrics.json"
-  --log_file "./eval/eval_loc_summary.log"
-  --frame_policy max_visible
-  --top_k 10
-  --grid_step 0.25
-  --prediction_strategy "weighted"
+  # localization.show_heatmap=true
+  # localization.show_arrows=true
+  # localization.show_3d=true
+  localization.save_metrics="./eval/eval_metrics.json"
+  localization.log_file="./eval/eval_loc_summary.log"
+  localization.frame_policy=max_visible
+  localization.top_k=10
+  localization.grid_step=0.25
+  localization.prediction_strategy=weighted
 )
 
 CMD=(
-  python -m whereami.visualization.visualize_eval_loc
-  --root "$SCENE_ROOT"
-  --graphs "$GRAPHS_DIR"
-  --query_root "$QUERY_ROOT"
+  python -m whereami.localization.cli
+  localization.root="$SCENE_ROOT"
+  localization.graphs="$GRAPHS_DIR"
+  localization.query_root="$QUERY_ROOT"
 )
 
 if [ ${#SCENE_IDS[@]} -gt 0 ]; then
-  CMD+=(--scene_ids "${SCENE_IDS[@]}")
+  # Build a comma-separated list for Hydra list override
+  IDS_STR=$(IFS=,; echo "${SCENE_IDS[*]}")
+  CMD+=(localization.scene_ids="[$IDS_STR]")
 fi
 
 CMD+=("${EXTRA_ARGS[@]}")

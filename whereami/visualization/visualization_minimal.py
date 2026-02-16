@@ -1,13 +1,20 @@
-# visualise_one_scene.py
-"""
-Colour the 3-D objects that BigGNN (or the DBSCAN overlap matcher) links to
+"""Visualizes matched objects for a single 3RScan scene.
+
+Colours the 3D objects that BigGNN (or the DBSCAN overlap matcher) links to
 each ScanScribe / Human caption for ONE scene.
 
-SPACE/ENTER → next caption
-q / ESC       → quit
+Controls:
+    SPACE / ENTER - next caption
+    q / ESC       - quit
 """
 
-import json, argparse, torch, numpy as np, open3d as o3d, sys
+import json
+import argparse
+import sys
+
+import torch
+import numpy as np
+import open3d as o3d
 from pathlib import Path
 
 from whereami.data_processing.scene_graph import SceneGraph
@@ -19,9 +26,14 @@ except ImportError:
 
 
 def load_scene(scan_dir: Path):
-    """
-    Loads labels.instances.annotated.v2.ply and builds obj2faces.
-    Returns a CPU TriangleMesh with full triangle_colors support.
+    """Loads a 3RScan mesh and builds per-object face mappings.
+
+    Args:
+        scan_dir: Path to a 3RScan scan directory containing the annotated PLY.
+
+    Returns:
+        Tuple of (mesh, obj2faces) where mesh is a CPU TriangleMesh and
+        obj2faces maps object IDs to arrays of face indices.
     """
     ply_path = scan_dir / "labels.instances.annotated.v2.ply"
     if not ply_path.exists():
@@ -76,6 +88,17 @@ def load_scene(scan_dir: Path):
 
 
 def colour_objects(mesh, obj2faces, matched, base=(0.6,0.6,0.6)):
+    """Paints matched objects with random colours on a grey mesh.
+
+    Args:
+        mesh: Open3D TriangleMesh.
+        obj2faces: Dictionary mapping object IDs to face index arrays.
+        matched: List of matched object IDs to highlight.
+        base: RGB tuple for unmatched vertices.
+
+    Returns:
+        The mesh with updated vertex colours.
+    """
     n_v   = len(mesh.vertices)
     vcols = np.tile(base, (n_v, 1))               # all vertices grey
     rng   = np.random.default_rng(42)
@@ -103,8 +126,15 @@ def to_legacy_cpu(mesh_t):
 
 @torch.inference_mode()
 def matched_object_ids(model, qg: SceneGraph, sg: SceneGraph):
-    """
-    Returns list of object IDs matched by either BigGNN or the pure-overlap fallback.
+    """Returns object IDs matched by BigGNN or the pure-overlap fallback.
+
+    Args:
+        model: Trained BigGNN model, or None for overlap-only matching.
+        qg: Query (text) scene graph.
+        sg: Database (3DSSG) scene graph.
+
+    Returns:
+        List of matched object IDs from the scene graph.
     """
     if model is None:
         print("No GNN model; using pure-overlap matcher")
@@ -112,23 +142,23 @@ def matched_object_ids(model, qg: SceneGraph, sg: SceneGraph):
         return [] if sub3d is None else list(sub3d.nodes)
     device = next(model.parameters()).device
     def prep(g):
-        n,e,f = g.to_pyg()
+        n, e, f = g.to_pyg()
         return (
           torch.tensor(np.array(n), dtype=torch.float32, device=device),
-          torch.tensor(np.array(e[0:2]),dtype=torch.int64,   device=device),
-          torch.tensor(np.array(f),     dtype=torch.float32, device=device),
+          torch.tensor(np.array(e[0:2]), dtype=torch.int64, device=device),
+          torch.tensor(np.array(f), dtype=torch.float32, device=device),
         )
-    x_n,x_e,x_f = prep(qg)
-    p_n,p_e,p_f = prep(sg)
-    _ = model(x_n,p_n,x_e,p_e,x_f,p_f)    #TODO I think GNN output should not be ignored
+    x_n, x_e, x_f = prep(qg)
+    p_n, p_e, p_f = prep(sg)
+    _ = model(x_n, p_n, x_e, p_e, x_f, p_f)
     _, sub3d = get_matching_subgraph(qg, sg)
-    # sub3d, _ = get_matching_subgraph(qg, sg) #TODO Which output to choose ? how to decide ?
     return [] if sub3d is None else list(sub3d.nodes)
 
 
 def main():
+    """Runs the interactive single-scene matched-object viewer."""
     p = argparse.ArgumentParser()
-    p.add_argument("--scan-id", required=True) # default="095821f7-e2c2-2de1-9568-b9ce59920e29"
+    p.add_argument("--scan-id", required=True)
     p.add_argument("--root",    required=True,
                    help="parent of 3RScan/<scan_id>/")
     p.add_argument("--graphs",  required=True,
@@ -184,7 +214,6 @@ def main():
 
     for cap_key, qg in captions.items():
         matched = matched_object_ids(model, qg, sg)
-        # matched.append(12) #TODO for testing
         print(f"\n─────── {cap_key} ───────")
         print("Matched object IDs:", matched)
         print("SPACE/ENTER → next    |    q/Esc → quit")

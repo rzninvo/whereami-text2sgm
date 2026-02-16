@@ -1,15 +1,16 @@
-# # ──────────────────────────────────  visualization_graph-object.py  ──────────────────────────────────
-# visualization_graph-object.py
-"""
-For each human‐text caption, find its best‐matched scene, worst‐matched scene,
-and its own (ground‐truth) scene, then show all three side‐by‐side with matched
-objects highlighted.
+"""Visualizes best/worst/ground-truth scene matches for each caption.
+
+For each human-text caption, finds the best-matched scene, worst-matched scene,
+and its own (ground-truth) scene, then shows all three with matched objects highlighted.
+
 Controls:
-    SPACE / ENTER → next caption
-    q / ESC       → quit
+    SPACE / ENTER - next caption
+    q / ESC       - quit
 """
 
-import argparse, json, sys, random
+import argparse
+import json
+import sys
 from pathlib import Path
 
 
@@ -165,6 +166,7 @@ def visualize_match(scan_root: Path,
     vis.destroy_window()
 
 def main():
+    """Runs the interactive best/worst/GT visualization loop for all captions."""
     p = argparse.ArgumentParser()
     p.add_argument("--root",   required=True,
                    help="parent folder of 3RScan/<scan_id>/")
@@ -180,8 +182,6 @@ def main():
     # 1) load scene-graphs
     raw3d = torch.load(Path(args.graphs)/"3dssg"/"3dssg_graphs_processed_edgelists_relationembed.pt",
                        map_location="cpu")
-    # raw3d = torch.load(Path(args.graphs)/"3dssg"/"3dssg_graphs_processed_edgelists_relationembed.pt",
-    #                    map_location="cpu")
     database_3dssg = {
       sid: SceneGraph(sid, graph_type="3dssg", graph=g,
                       max_dist=1.0, embedding_type="word2vec",
@@ -191,7 +191,6 @@ def main():
 
     # 2) load text-graphs
     rawtxt = torch.load(Path(args.graphs)/"scanscribe"/"scanscribe_text_graphs_from_image_desc_node_edge_features.pt", map_location="cpu")
-    # rawtxt = torch.load(Path(args.graphs)/"human"/"human_graphs_processed.pt", map_location="cpu")
     dataset = [
       SceneGraph(k.split("_")[0], txt_id=None,
                  graph=g, graph_type="human",
@@ -232,5 +231,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# # ────────────────────────────────────────────────────────────────────────────────

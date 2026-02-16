@@ -2,7 +2,6 @@ import torch
 from tqdm import tqdm
 import random
 import numpy as np
-random.seed(3)
 
 from whereami.data_processing.scene_graph_utils import check_valid_graph
 
@@ -168,23 +167,33 @@ class SceneGraph:
         return node_features
 
 if __name__ == '__main__':
-    ######## 3DSSG ######### 1335 3DSSG graphs
-    _3dssg_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt')
+    import argparse
+    import os
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_root', type=str,
+                        default=os.environ.get('WHEREAMI_DATA_ROOT', './data'),
+                        help='Root data directory')
+    cli_args = parser.parse_args()
+    from pathlib import Path
+    graphs_dir = Path(cli_args.data_root) / 'processed_data'
+
+    ######## 3DSSG #########
+    _3dssg_scenes = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt')
     for sceneid in tqdm(_3dssg_scenes):
         sg = SceneGraph(sceneid,
-                        graph_type='3dssg', 
-                        graph=_3dssg_scenes[sceneid], 
+                        graph_type='3dssg',
+                        graph=_3dssg_scenes[sceneid],
                         max_dist=1.0, embedding_type='ada')
-    
-    ######### ScanScribe ######### 218 ScanScribe graphs
-    scanscribe_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/scanscribe/scanscribe_cleaned_original_node_edge_features.pt')
+
+    ######### ScanScribe #########
+    scanscribe_scenes = torch.load(graphs_dir / 'scanscribe' / 'scanscribe_cleaned_original_node_edge_features.pt')
     for scene_id in tqdm(scanscribe_scenes):
         txtids = scanscribe_scenes[scene_id].keys()
-        assert(len(set(txtids)) == len(txtids)) # no duplicate txtids
-        assert(len(set(txtids)) == len(range(max([int(id) for id in txtids]) + 1))) # no missing txtids
+        assert(len(set(txtids)) == len(txtids))
+        assert(len(set(txtids)) == len(range(max([int(id) for id in txtids]) + 1)))
         for txt_id in txtids:
             sg = SceneGraph(scene_id,
                             txt_id=txt_id,
-                            graph_type='scanscribe', 
-                            graph=scanscribe_scenes[scene_id][txt_id], 
+                            graph_type='scanscribe',
+                            graph=scanscribe_scenes[scene_id][txt_id],
                             embedding_type='ada')

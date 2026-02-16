@@ -1,9 +1,15 @@
 # file for args
 
 import argparse
+import os
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--data_root', type=str,
+                        default=os.environ.get('WHEREAMI_DATA_ROOT', './data'),
+                        help='Root directory containing processed_data/ and model_checkpoints/')
+    parser.add_argument('--eval_output_dir', type=str, default=None,
+                        help='Directory for evaluation output files (default: <data_root>/eval_outputs)')
     parser.add_argument('--mode', type=str, default='online')
     parser.add_argument('--epoch', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.0001)

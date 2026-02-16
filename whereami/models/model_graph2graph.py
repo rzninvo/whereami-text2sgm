@@ -27,21 +27,21 @@ class SimpleTConv(MessagePassing):
 
 class BigGNN(nn.Module):
 
-    def __init__(self, N, heads):
+    def __init__(self, N, heads, embed_dim=300):
         super().__init__()
         self.N = N
-        in_n, in_e, out_n = 300, 300, 300
+        in_n, in_e, out_n = embed_dim, embed_dim, embed_dim
         self.TSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
         self.GSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
         self.TCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
         self.GCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
 
         self.SceneText_MLP = nn.Sequential(
-            nn.Linear(300*2, 600), # TODO: input dimension is hardcoded now
+            nn.Linear(embed_dim * 2, embed_dim * 2),
             nn.LeakyReLU(),
-            nn.Linear(600, 300),
+            nn.Linear(embed_dim * 2, embed_dim),
             nn.LeakyReLU(),
-            nn.Linear(300, 1),
+            nn.Linear(embed_dim, 1),
             nn.Sigmoid()
         )
 

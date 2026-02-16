@@ -47,5 +47,3 @@ class Timer:
             calc_time = time_for_embedding + time_for_matching_score * args.out_of + time_for_matching
             # save total run time
             f.write(f'Total run time for 1 text matching against {args.out_of} database scenes: {calc_time}\n')
-
-timer = Timer()

@@ -53,12 +53,16 @@ def add_node_features(all_scenes):
     return all_scenes
 
 if __name__ == '__main__':
-    all_scenes = process_scenes_to_dict('/home/julia/Documents/h_coarse_loc/data/human/data_extract_completion')
-    # all_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/human/human_graphs_unprocessed.pt')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input_dir', type=str, required=True, help='Directory with human annotation JSONs')
+    parser.add_argument('--output', type=str, required=True, help='Path to save processed .pt file')
+    cli_args = parser.parse_args()
+
+    all_scenes = process_scenes_to_dict(cli_args.input_dir)
     all_scenes = add_node_features(all_scenes)
     all_scenes = add_edge_features(all_scenes)
-    torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/human/human_graphs_processed.pt')
+    torch.save(all_scenes, cli_args.output)
 
-    all_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/human/human_graphs_processed.pt')
     print(f'keys: {all_scenes.keys()}')
     print(f'len of keys: {len(all_scenes.keys())}')

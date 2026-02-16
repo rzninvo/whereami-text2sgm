@@ -10,19 +10,30 @@ import tiktoken
 import tqdm
 import sys
 
-import spacy
-import en_core_web_lg
-nlp = spacy.load("en_core_web_lg")
-
 from whereami.utils.utils import load_text_dataset
 
 # -------------------------------------------------------------------------------------------
-# CHANGED to implement clip embeddings
-from transformers import CLIPTokenizer, CLIPModel
+# Lazy-loaded spaCy model
+_nlp = None
 
-# CHANGED to implement clip embeddings: initialize CLIP tokenizer & model
-_clip_tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
-_clip_model     = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True)
+def _get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        _nlp = spacy.load("en_core_web_lg")
+    return _nlp
+
+# Lazy-loaded CLIP tokenizer & model
+_clip_tokenizer = None
+_clip_model = None
+
+def _get_clip():
+    global _clip_tokenizer, _clip_model
+    if _clip_tokenizer is None:
+        from transformers import CLIPTokenizer, CLIPModel
+        _clip_tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+        _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True)
+    return _clip_tokenizer, _clip_model
 
 # -------------------------------------------------------------------------------------------
 
@@ -62,7 +73,8 @@ def create_embedding_clip(text: str) -> torch.Tensor:
     """
     Returns a 512-dimensional CLIP text embedding for the given string.
     """
-    inputs = _clip_tokenizer(
+    tokenizer, model = _get_clip()
+    inputs = tokenizer(
         text,
         padding=True,
         truncation=True,
@@ -70,7 +82,7 @@ def create_embedding_clip(text: str) -> torch.Tensor:
         return_tensors="pt"
     )
     with torch.no_grad():
-        outputs   = _clip_model.get_text_features(**inputs)
+        outputs   = model.get_text_features(**inputs)
         embedding = outputs.squeeze(0)
     return embedding
 
@@ -79,7 +91,8 @@ def create_embeddings_clip_batch(texts: list[str]) -> torch.Tensor:
     """
     Returns an (N × 512) tensor of CLIP embeddings for a list of N strings.
     """
-    inputs = _clip_tokenizer(
+    tokenizer, model = _get_clip()
+    inputs = tokenizer(
         texts,
         padding=True,
         truncation=True,
@@ -87,7 +100,7 @@ def create_embeddings_clip_batch(texts: list[str]) -> torch.Tensor:
         return_tensors="pt"
     )
     with torch.no_grad():
-        outputs = _clip_model.get_text_features(**inputs)  # (N, 512)
+        outputs = model.get_text_features(**inputs)  # (N, 512)
     return outputs
 # -------------------------------------------------------------------------------------------
 
@@ -111,7 +124,7 @@ def tokenize_text(filename):
 
 def create_embedding_nlp(text):
     # spacy embedding
-    doc = nlp(text)
+    doc = _get_nlp()(text)
     embedding = doc.vector
     assert(len(embedding) == 300)
     return embedding
@@ -168,7 +181,8 @@ if __name__ == '__main__':
     embeddings = tokenize_text(args.filename)
 
     # save
-    with open('../scripts/hugging_face/scanscribe_2_embeddings.json', 'w') as fp:
+    scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'hugging_face')
+    with open(os.path.join(scripts_dir, 'scanscribe_2_embeddings.json'), 'w') as fp:
         json.dump(embeddings, fp)
     
     # dict_of_embeddings = tokenize_text(args.filename)

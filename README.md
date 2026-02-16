@@ -49,6 +49,7 @@ whereami-text2sgm/
       metrics.py                    # SceneMetrics, Hit@r, mass-radius, IoU
       coarse_search.py              # Multi-level coarse-to-fine arrow search
       visualization.py              # Colour maps, FOV geometry, plot helpers
+      pipeline.py                   # Shared localization pipeline (grid → probs → render)
       evaluation.py                 # Unified evaluate_scene + run_evaluation
       cli.py                        # Hydra CLI entry point
     visualization/                  # Standalone visualization scripts

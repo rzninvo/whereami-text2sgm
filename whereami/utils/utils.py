@@ -2,29 +2,35 @@
 import warnings
 warnings.filterwarnings("ignore", message=r"\[W095\]", category=UserWarning)
 
-import spacy
-import en_core_web_lg
-# nlp = spacy.load("en_core_web_md")
-nlp = spacy.load("en_core_web_lg")
-
+import os
 import numpy as np
 import torch
 import re
 import json
 import math
 
+# Lazy-loaded spaCy model
+_nlp = None
+
+def _get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        _nlp = spacy.load("en_core_web_lg")
+    return _nlp
+
 ################################ DATASET LOAD ################################
 
 def load_text_dataset(filename):
+    _scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'hugging_face')
     if filename[0:11] == "scanscribe_":
-        with open("../scripts/hugging_face/" + filename, "r") as f:
+        with open(os.path.join(_scripts_dir, filename), "r") as f:
             scanscribe = json.load(f)
-        
+
         scan_ids = scanscribe.keys()
         dict_of_texts = scanscribe
     elif filename == "scanscribe.json":
-        # open scanscribe.json
-        with open("../scripts/hugging_face/" + filename, "r") as f:
+        with open(os.path.join(_scripts_dir, filename), "r") as f:
             scanscribe = json.load(f)
         # load text data
         scan_ids = set()
@@ -86,7 +92,7 @@ def noun_in_list_of_nouns(noun, nouns, threshold=0.5):
     max_sim_noun = None
     for n in nouns:
         # oun_vec = nlp(n)[0].vector
-        sim = nlp(noun).similarity(nlp(n))
+        sim = _get_nlp()(noun).similarity(_get_nlp()(n))
         if sim > max_sim:
             max_sim = sim
             max_sim_noun = n
@@ -95,15 +101,15 @@ def noun_in_list_of_nouns(noun, nouns, threshold=0.5):
 def vectorize_word(word):
     if word == "":
         return np.zeros(300) # TODO: hard coded because spacy vectorize is 300
-    return nlp(word)[0].vector
+    return _get_nlp()(word)[0].vector
 
 # Recover the word given a vector
 def recover_word(vector, top_n=3):
     assert(len(vector) == 300)
-    ms = nlp.vocab.vectors.most_similar(
+    ms = _get_nlp().vocab.vectors.most_similar(
         np.asarray([vector]), n=top_n
     )
-    words = [nlp.vocab.strings[w] for w in ms[0][0]]
+    words = [_get_nlp().vocab.strings[w] for w in ms[0][0]]
     return words
 
 def print_closest_words(out, x, first_n=5):
@@ -125,15 +131,15 @@ def print_closest_words(out, x, first_n=5):
         print("Closest words to " + str(x_word) + ": " + str(out_word))
 
 def print_word_distances(word1, word2):
-    word1_vec = nlp(word1)[0].vector
-    word2_vec = nlp(word2)[0].vector
+    word1_vec = _get_nlp()(word1)[0].vector
+    word2_vec = _get_nlp()(word2)[0].vector
     print("Distance between " + word1 + " and " + word2 + ": " + str(np.linalg.norm(word1_vec - word2_vec)))
 
 def print_word_similarity(word1, word2):
-    print("Similarity between " + word1 + " and " + word2 + ": " + str(nlp(word1).similarity(nlp(word2))))
+    print("Similarity between " + word1 + " and " + word2 + ": " + str(_get_nlp()(word1).similarity(_get_nlp()(word2))))
 
 def word_similarity(word1, word2):
-    return nlp(word1).similarity(nlp(word2))
+    return _get_nlp()(word1).similarity(_get_nlp()(word2))
 
 ################################ TORCH GRAPH UTILS ################################
 
@@ -186,22 +192,10 @@ def accuracy_score(y_pred, y_true, top_n=3, thresh=0.8):
             count_correct += 1
         else: # Check if it's within some threshold of similarity
             for y in y_pred_word:
-                if nlp(y_true_word[0]).similarity(nlp(y)) >= thresh:
+                if _get_nlp()(y_true_word[0]).similarity(_get_nlp()(y)) >= thresh:
                     count_correct += 1
                     break
 
     return count_correct / y_pred.shape[0]
 
-# main
-if __name__ == '__main__':
-    # check the similarity between chair and couch
-    things = ['shower', 'sink', 'window', 'floor', 'wall', 'mirror']
-    avg_t = []
-    for t in things:
-        t_vector = nlp(t)[0].vector
-        avg_t.append(t_vector)
-    avg_t = np.mean(avg_t, axis=0)
-    t_word_top_n = recover_word(avg_t)
-    print("Closest to list things, ", t_word_top_n)
-    print_word_similarity('bathroom', t_word_top_n[0])
 

@@ -5,12 +5,14 @@ inference_single.py
 Open-set inference:
 Take a natural language query → build a text-graph → match against 3DSSG database.
 
-Usage:
-    python inference_single.py --graphs ../data_checkpoints/processed_data \
-                               --ckpt ../model_checkpoints/graph2graph/best_model.pt \
-                               --query "There is a wooden chair next to a table." \
-                               --api_key_file ../keys/openai_key.txt \
-                               --top_k 5
+Usage::
+
+    python -m whereami.models.single_inference \
+        --graphs $WHEREAMI_DATA_ROOT/processed_data \
+        --ckpt $WHEREAMI_DATA_ROOT/model_checkpoints/graph2graph/best_model.pt \
+        --query "There is a wooden chair next to a table." \
+        --api_key_file /path/to/openai_key.txt \
+        --top_k 5
 """
 
 import argparse, json, sys, torch, numpy as np, torch.nn.functional as F

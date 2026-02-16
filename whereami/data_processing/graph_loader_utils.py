@@ -7,10 +7,16 @@ import warnings
 warnings.filterwarnings("ignore", message=r"\[W095\]", category=UserWarning)
 
 import torch
-import spacy
-import en_core_web_lg
-# nlp = spacy.load("en_core_web_md")
-nlp = spacy.load("en_core_web_lg")
+
+# Lazy-loaded spaCy model
+_nlp = None
+
+def _get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        _nlp = spacy.load("en_core_web_lg")
+    return _nlp
 
 # CHANGED to implement clip embeddings
 from whereami.data_processing.create_text_embeddings import create_embedding, create_embedding_clip
@@ -121,7 +127,7 @@ def get_word2vec(desc, hash):
     if desc in hash:
         return hash[desc], hash
     else:
-        hash[desc] = nlp(desc)[0].vector
+        hash[desc] = _get_nlp()(desc)[0].vector
     return hash[desc], hash
 
 def check_and_remove_invalid_edges(all_scenes):

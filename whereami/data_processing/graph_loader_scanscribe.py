@@ -59,26 +59,12 @@ def add_node_features(all_scenes):
     return all_scenes
 
 if __name__ == '__main__':
-    # all_scenes = process_scenes_to_dict('/home/julia/Documents/h_coarse_loc/data/scanscribe/data/scanscribe_cleaned')
-    # all_scenes = torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/raw_data/scanscribe/scanscribe_cleaned_original.pt')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', type=str, required=True, help='Path to input .pt file to inspect')
+    cli_args = parser.parse_args()
 
-    # all_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/raw_data/scanscribe/scanscribe_cleaned_original.pt')
-    # all_scenes = add_node_features(all_scenes)
-    # torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/scanscribe/scanscribe_cleaned_original_node_features.pt')
-
-    # all_scenes = torch.load('/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/scanscribe/scanscribe_cleaned_original_node_features.pt')
-    # all_scenes = add_edge_features(all_scenes)
-    # torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/scanscribe/scanscribe_cleaned_original_node_edge_features.pt')
-    
-    p = '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/scanscribe/scanscribe_cleaned_original_node_edge_features.pt'
-    all_scenes = torch.load(p)
-
-    print(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['edges'][1]['relationship'])
-    print(len(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['edges'][1]['relation_ada']))
-    print(len(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['edges'][1]['relation_word2vec']))
-    print(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['nodes'][1]['attributes'])
-    print(len(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['nodes'][1]['attributes_ada']['all']))
-    print(len(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['nodes'][1]['attributes_word2vec']['all']))
-
-    print(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['nodes'][1].keys())
-    print(all_scenes['1d234004-e280-2b1a-8ec8-560046b9fc96'][0]['edges'][1].keys())
+    all_scenes = torch.load(cli_args.input)
+    sample_key = list(all_scenes.keys())[0]
+    print(f'Sample scene: {sample_key}')
+    print(f'Total scenes: {len(all_scenes)}')

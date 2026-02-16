@@ -16,5 +16,8 @@ human_graphs: ${paths.graphs_dir}/human/human_graphs_processed.pt
 # 3RScan mesh root
 3rscan_root: ${oc.env:RSCAN_ROOT, null}
 
+# Evaluation output directory
+eval_outputs: ${paths.data_root}/eval_outputs
+
 # Query root (frame JSONs with GT poses)
 query_root: null

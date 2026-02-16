@@ -9,31 +9,37 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from whereami.data_processing.graph_loader_utils import get_obj_distance, bounding_box, plot_relation, get_ada, get_clip, get_word2vec
-# TODO: Refactor everything to show the usage of CLIP embeddings instead of Ada embeddings
 # Parameters for creating scene graphs
 dist_thr = 1.0
 
-# Load the files once
-_datasets_dir = os.environ.get("WHEREAMI_DATA_ROOT", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
-objects_path = os.path.join(_datasets_dir, '3DSSG', 'objects.json')
-objects = {}
-with open(objects_path, 'r') as f:
-    objects = json.load(f)
-scans = objects['scans']
-scans_dict = {}
-for s in scans:
-    scans_dict[s['scan']] = s
+# Lazy-loaded 3DSSG data (objects.json / relationships.json)
+_scans_dict = None
+_relationships_dict = None
 
-relationships_path = os.path.join(_datasets_dir, '3DSSG', 'relationships.json')
-relationships = {}
-with open(relationships_path, 'r') as f:
-    relationships = json.load(f)
-relationships = relationships['scans']
-relationships_dict = {}
-for r in relationships:
-    relationships_dict[r['scan']] = r
+def _load_3dssg_data():
+    global _scans_dict, _relationships_dict
+    if _scans_dict is not None:
+        return _scans_dict, _relationships_dict
+
+    datasets_dir = os.environ.get("WHEREAMI_DATA_ROOT", os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+    objects_path = os.path.join(datasets_dir, '3DSSG', 'objects.json')
+    with open(objects_path, 'r') as f:
+        objects = json.load(f)
+    _scans_dict = {}
+    for s in objects['scans']:
+        _scans_dict[s['scan']] = s
+
+    relationships_path = os.path.join(datasets_dir, '3DSSG', 'relationships.json')
+    with open(relationships_path, 'r') as f:
+        relationships = json.load(f)
+    _relationships_dict = {}
+    for r in relationships['scans']:
+        _relationships_dict[r['scan']] = r
+
+    return _scans_dict, _relationships_dict
 
 def process_scenes(dir_to_scenes, plot=False, dist_thr=1.0):
+    scans_dict, relationships_dict = _load_3dssg_data()
     ids = os.listdir(os.path.join(dir_to_scenes, '3RScan'))
     scenes = {}
     for id in tqdm(ids):
@@ -45,15 +51,16 @@ def process_scenes(dir_to_scenes, plot=False, dist_thr=1.0):
             scenes[id] = scene
         except Exception as e:
             print(f'Error processing scene {id}: {e}')
-        
+
     assert(len(scenes) == len(relationships_dict))
     return scenes
 
 def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist_thr=1.0):
+    scans_dict, relationships_dict = _load_3dssg_data()
     # Path for segmentations
     segmentations_path = os.path.join(dir_to_objects, '3RScan', scene_id, 'semseg.v2.json')
     segmentations = {}
-    with open(segmentations_path, 'r') as f:    
+    with open(segmentations_path, 'r') as f:
         segmentations = json.load(f)
     segmentations = segmentations['segGroups']
 
@@ -61,12 +68,12 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
     assert len(objects_in_scan) == len(segmentations)
 
     objects_in_scan = pd.DataFrame(objects_in_scan)
-    objects_in_scan = objects_in_scan.drop(columns=['nyu40', 'ply_color', 'eigen13', 'rio27', 'affordances', 'state_affordances', 'symmetry'], errors='ignore') # Ignore errors if column does not exist
+    objects_in_scan = objects_in_scan.drop(columns=['nyu40', 'ply_color', 'eigen13', 'rio27', 'affordances', 'state_affordances', 'symmetry'], errors='ignore')
 
     # Convert back to list of dicts
     objects_in_scan = objects_in_scan.set_index('id', drop=False).to_dict('index')
 
-    # Turn segmentation into a dict indexted by id
+    # Turn segmentation into a dict indexed by id
     segmentations_dict = {}
     for seg in segmentations:
         segmentations_dict[str(seg['id'])] = seg
@@ -75,18 +82,16 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    
+
     # Add segmentation to objects_in_scan per object
     for obj_id in objects_in_scan.keys():
         obj = objects_in_scan[obj_id]
-        # Check that we are adding the correct segmentation to the correct object based on label
         assert obj['label'] == segmentations_dict[obj_id]['label']
         obj['obb'] = segmentations_dict[obj['id']]['obb']
 
         if (plot):
             bounding_box(obj, ax, plot=True)
 
-        # Also add object to graph_adj
         graph_adj[obj_id] = {'label': obj['label'], 'adj_to': []}
 
     # Process relationships
@@ -94,14 +99,9 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
     relationship = relationships_dict[scene_id]
 
     for r in relationship['relationships']:
-        # first_obj = str(r[0])  # str(int)
-        # second_obj = str(r[1]) # str(int)
-        # relation = r[3]   # str; first_obj --> relation --> second_obj
-        #                     # side table 'standing on' floor
         assert(str(r[0]) in graph_adj)
         assert(str(r[1]) in graph_adj)
 
-        # Add to adjacency list
         distance = get_obj_distance(str(r[0]), str(r[1]), objects_in_scan)
         if plot and distance < dist_thr:
             plot_relation(objects_in_scan[str(r[0])], objects_in_scan[str(r[1])], ax, distance)
@@ -110,10 +110,11 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
 
     if plot:
         plt.show()
-        
+
     return objects_in_scan, graph_adj
 
-def add_edge_list(all_scenes):
+def add_edge_list(all_scenes, output_path=None):
+    _, relationships_dict = _load_3dssg_data()
     hada = {}
     hw2v = {}
     for sceneid in tqdm(all_scenes):
@@ -130,8 +131,7 @@ def add_edge_list(all_scenes):
             relation_list.append(rel[3])
             w2v, hw2v = get_word2vec(rel[3], hw2v)
             relation_word2vec_list.append(w2v)
-            # ada, hada = get_ada(rel[3], hada)
-            ada, hada = get_clip(rel[3], hada) # Changed to use CLIP embeddings
+            ada, hada = get_clip(rel[3], hada)
             relation_ada_list.append(ada)
             dist_list.append(get_obj_distance(str(rel[0]), str(rel[1]), all_scenes[sceneid]['objects']))
         assert(len(obj1_list) == len(obj2_list) == len(relation_list) == len(dist_list))
@@ -142,18 +142,17 @@ def add_edge_list(all_scenes):
         all_scenes[sceneid]['edge_lists']['relation_word2vec'] = relation_word2vec_list
         all_scenes[sceneid]['edge_lists']['relation_ada'] = relation_ada_list
         all_scenes[sceneid]['edge_lists']['distance'] = dist_list
-    # torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt') # changed to save with CLIP embeddings
-    torch.save(all_scenes, '/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/data_checkpoints/processed_data/3dssg/clip_3dssg_graphs_processed_edgelists_relationembed.pt') # uncomment to save
+    if output_path:
+        torch.save(all_scenes, output_path)
 
-def add_node_features(all_scenes):
+def add_node_features(all_scenes, output_path=None):
     hada = {}
     hw2v = {}
     print(len(all_scenes))
     for scene in tqdm(all_scenes):
         objects = all_scenes[scene]['objects']
         for obj in tqdm(objects):
-            # label_ada, hada = get_ada(objects[obj]['label'], hada)
-            label_ada, hada = get_clip(objects[obj]['label'], hada) # Changed to use CLIP embeddings
+            label_ada, hada = get_clip(objects[obj]['label'], hada)
             objects[obj]['label_ada'] = label_ada
             label_word2vec, hw2v = get_word2vec(objects[obj]['label'], hw2v)
             objects[obj]['label_word2vec'] = label_word2vec
@@ -165,15 +164,15 @@ def add_node_features(all_scenes):
                 for attr in objects[obj]['attributes'][attrs]:
                     attr_word2vec, hw2v = get_word2vec(attr, hw2v)
                     attributes_word2vec[attrs].append(attr_word2vec)
-                    # attr_ada, hada = get_ada(attr, hada)
-                    attr_ada, hada = get_clip(attr, hada) # Changed to use CLIP embeddings
+                    attr_ada, hada = get_clip(attr, hada)
                     attributes_ada[attrs].append(attr_ada)
             objects[obj]['attributes_word2vec'] = attributes_word2vec
             objects[obj]['attributes_ada'] = attributes_ada
-    # torch.save(all_scenes, '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed.pt') # changed to save with CLIP embeddings
-    torch.save(all_scenes, '/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/data_checkpoints/processed_data/3dssg/clip_3dssg_graphs_processed.pt') # uncomment to save
+    if output_path:
+        torch.save(all_scenes, output_path)
 
 def check_num_edges(all_scenes):
+    _, relationships_dict = _load_3dssg_data()
     num_edges = []
     adj_num_edges = []
     for scene in all_scenes:
@@ -198,21 +197,11 @@ def change_w2v_word2vec(all_scenes, p):
 
 
 if __name__ == "__main__":
-    # ---------------------CHANGED to implement CLIP embeddings---------------------
-    # all_scenes = torch.load('/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/data_checkpoints/raw_data/3dssg/3dssg_graphs_original.pt')
-    # add_node_features(all_scenes)
-    # all_scenes = torch.load('/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed.pt')
-    # add_edge_list(all_scenes)
-    # -------------------------------------------------------------------------------
-    all_scenes = torch.load('/home/klrshak/work/VisionLang/whereami-text2sgm/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt')
-    add_edge_list(all_scenes)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', type=str, required=True, help='Path to input .pt file')
+    parser.add_argument('--output', type=str, default=None, help='Path to output .pt file')
+    cli_args = parser.parse_args()
 
-
-    # ----------------------------------------ORIGINAL BELOW----------------------------------------
-    # p = '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt'
-    # all_scenes = torch.load(p)
-    # change_w2v_word2vec(all_scenes, p)
-
-    # p = '/home/julia/Documents/h_coarse_loc/playground/graph_models/data_checkpoints/processed_data/3dssg/3dssg_graphs_processed.pt'
-    # all_scenes = torch.load(p)
-    # change_w2v_word2vec(all_scenes, p)
+    all_scenes = torch.load(cli_args.input)
+    add_edge_list(all_scenes, output_path=cli_args.output)

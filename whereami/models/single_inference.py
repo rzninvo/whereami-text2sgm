@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-inference_single.py
-===================
-Open-set inference:
-Take a natural language query → build a text-graph → match against 3DSSG database.
+"""Open-set single-query inference: natural language to top-k 3DSSG scene matches.
 
 Usage::
 
@@ -15,28 +11,38 @@ Usage::
         --top_k 5
 """
 
-import argparse, json, sys, torch, numpy as np, torch.nn.functional as F
+import argparse
+import json
+
+import numpy as np
 import openai
+import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 from pathlib import Path
 
-# --------------------------------------------------------------------------- #
-# Local imports                                                               #
-# --------------------------------------------------------------------------- #
-
 from whereami.data_processing.scene_graph import SceneGraph
 from whereami.models.model_graph2graph import BigGNN
-from whereami.analysis.helper import get_matching_subgraph
+from whereami.models.inference import compute_match_score
+from whereami.data_processing.create_text_embeddings import (
+    create_embedding, create_embedding_clip, create_embedding_nlp
+)
 
-from whereami.data_processing.create_text_embeddings import create_embedding, create_embedding_clip, create_embedding_nlp
 
-
-# --------------------------------------------------------------------------- #
-# Helper: embed words depending on backend
-# --------------------------------------------------------------------------- #
 def embed_word(word: str, embedding_type="word2vec"):
+    """Embeds a single word using the specified backend.
+
+    Args:
+        word: Word or phrase to embed.
+        embedding_type: One of ``'word2vec'``, ``'clip'``, or ``'ada'``.
+
+    Returns:
+        List of floats representing the embedding vector.
+
+    Raises:
+        ValueError: If ``embedding_type`` is not recognized.
+    """
     if embedding_type == "word2vec":
-        # spaCy word2vec
         return create_embedding_nlp(word).tolist()
     elif embedding_type == "clip":
         return create_embedding_clip(word).tolist()
@@ -46,15 +52,23 @@ def embed_word(word: str, embedding_type="word2vec"):
         raise ValueError(f"Unknown embedding type {embedding_type}")
 
 
-# --------------------------------------------------------------------------- #
-# Helper: parse text to JSON for text graph formats using LLM (GPT-4o)
-# --------------------------------------------------------------------------- #
 def parse_text_to_json(query_text: str, debug: bool = False) -> dict:
+    """Uses GPT to extract a scene graph from a natural language description.
+
+    Sends the query to GPT-4o-mini to parse objects, attributes, and
+    relationships into a structured JSON graph.
+
+    Args:
+        query_text: Natural language scene description.
+        debug: If True, prints raw LLM output and parsed JSON.
+
+    Returns:
+        Dictionary with ``'nodes'`` and ``'edges'`` lists ready for SceneGraph.
+
+    Raises:
+        ValueError: If the LLM returns invalid JSON that cannot be parsed.
     """
-    Uses GPT to extract objects, attributes, and relationships from a text description.
-    Returns a dict with "nodes" and "edges" ready for SceneGraph.
-    """
-    client = openai.OpenAI(api_key = openai.api_key)
+    client = openai.OpenAI(api_key=openai.api_key)
     prompt = f"""
     You are a parser that converts natural language scene descriptions into a JSON graph.
     Extract:
@@ -103,14 +117,13 @@ def parse_text_to_json(query_text: str, debug: bool = False) -> dict:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        # Try to extract JSON substring if GPT adds extra text
         import re
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             parsed = json.loads(match.group(0))
         else:
             raise ValueError(f"LLM returned invalid JSON:\n{raw}")
-        
+
     if debug:
         print("\n[DEBUG] Parsed JSON graph:")
         print(json.dumps(parsed, indent=2))
@@ -118,22 +131,31 @@ def parse_text_to_json(query_text: str, debug: bool = False) -> dict:
     return parsed
 
 
-# --------------------------------------------------------------------------- #
-# Convert query text into a SceneGraph
-# --------------------------------------------------------------------------- #
 def text_to_scenegraph(query_text: str,
                        embedding_type="word2vec",
                        scene_id="query_0001", debug: bool = False):
+    """Converts a natural language query into a SceneGraph.
+
+    Parses the text with GPT, embeds all node labels, attributes, and edge
+    relationships, then constructs a SceneGraph.
+
+    Args:
+        query_text: Natural language scene description.
+        embedding_type: Embedding backend (``'word2vec'``, ``'clip'``, or ``'ada'``).
+        scene_id: Scene ID to assign to the resulting graph.
+        debug: If True, enables debug output during parsing.
+
+    Returns:
+        A SceneGraph constructed from the parsed and embedded text.
+    """
     parsed = parse_text_to_json(query_text, debug)
 
-    # Embed nodes
     for node in parsed["nodes"]:
         node["label_" + embedding_type] = embed_word(node["label"], embedding_type)
         node["attributes_" + embedding_type] = {
             "all": [embed_word(a, embedding_type) for a in node["attributes"]]
         }
 
-    # Embed edges
     for edge in parsed["edges"]:
         edge["relation_" + embedding_type] = embed_word(edge["relationship"], embedding_type)
 
@@ -144,43 +166,13 @@ def text_to_scenegraph(query_text: str,
                       use_attributes=True)
 
 
-# --------------------------------------------------------------------------- #
-# Compute similarity
-# --------------------------------------------------------------------------- #
-@torch.inference_mode()
-def compute_match_score(model: BigGNN | None,
-                        qg: SceneGraph,
-                        sg: SceneGraph,
-                        device="cpu") -> float:
-    q_sub, s_sub = get_matching_subgraph(qg, sg)
-    def bad(g): return (g is None or len(g.nodes) <= 1
-                        or (hasattr(g, "edge_idx") and len(g.edge_idx[0]) < 1))
-    if bad(q_sub) or bad(s_sub):
-        q_sub, s_sub = qg, sg
-
-    def prep(g: SceneGraph):
-        n, e, f = g.to_pyg()
-        return (torch.tensor(np.array(n), dtype=torch.float32, device=device),
-                torch.tensor(np.array(e[0:2]), dtype=torch.int64,   device=device),
-                torch.tensor(np.array(f),      dtype=torch.float32, device=device))
-
-    q_n, q_e, q_f = prep(q_sub)
-    s_n, s_e, s_f = prep(s_sub)
-
-    if model is None:
-        cos = F.cosine_similarity(q_n.mean(0, keepdim=True),
-                                  s_n.mean(0, keepdim=True), dim=1).item()
-        return (cos + 1) / 2
-
-    q_emb, s_emb, m_p = model(q_n, s_n, q_e, s_e, q_f, s_f)
-    cos = (F.cosine_similarity(q_emb, s_emb, dim=0).item() + 1) / 2
-    return 0.5 * m_p.item() + 0.5 * cos
-
-
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 def parse_args():
+    """Parses command-line arguments for single-query inference.
+
+    Returns:
+        Parsed argument namespace with graphs path, checkpoint, query text,
+        embedding type, top_k, device, API key file, and debug flag.
+    """
     p = argparse.ArgumentParser()
     p.add_argument("--graphs", required=True, type=Path,
                    help="Folder containing processed_data/{3dssg}/ sub-folder")
@@ -200,9 +192,10 @@ def parse_args():
 
 
 def main():
+    """Runs single-query text-to-scene retrieval against the 3DSSG database."""
     args = parse_args()
 
-    # 0) Load OpenAI API key
+    # Load OpenAI API key
     with open(args.api_key_file, "r") as f:
         line = f.read().strip()
         if line.startswith("OPENAI_API_KEY="):
@@ -211,7 +204,7 @@ def main():
             key = line
         openai.api_key = key
 
-    # 1) Load 3DSSG database
+    # Load 3DSSG database
     g3d_raw = torch.load(args.graphs / "3dssg" / "3dssg_graphs_processed_edgelists_relationembed.pt",
                          map_location="cpu", weights_only=False)
     database_3dssg = {
@@ -221,17 +214,17 @@ def main():
         for sid, g in g3d_raw.items()
     }
 
-    # 2) Load model
+    # Load model
     model = BigGNN(N=1, heads=2).to(args.device)
     model.load_state_dict(torch.load(args.ckpt, map_location=args.device, weights_only=False))
     model.eval()
 
-    # 3) Convert query text → SceneGraph
+    # Convert query text to SceneGraph
     query_graph = text_to_scenegraph(args.query,
                                      embedding_type=args.embedding_type,
                                      scene_id="query_0001", debug=args.debug)
 
-    # 4) Score against database
+    # Score against database
     scores = {}
     iterator = database_3dssg.items()
 
@@ -247,7 +240,7 @@ def main():
     print("Top matches:")
     for rank, (sid, sc) in enumerate(best, 1):
         print(f"  {rank:>2}. {sid:<18}  score={sc:5.3f}")
-    
+
     if args.debug:
         print("\n[DEBUG] Finished scoring all scenes.")
 

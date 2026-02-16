@@ -1,22 +1,28 @@
-# Collecting the different files for 3DSSG graphs and turning them into a single file
+"""Loads and processes 3DSSG scene graphs from raw JSON files into a single
+serializable dictionary with node features, edge lists, and embeddings.
+"""
+
 import os
 import json
 import torch
-import numpy as np
 import pandas as pd
-import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from whereami.data_processing.graph_loader_utils import get_obj_distance, bounding_box, plot_relation, get_ada, get_clip, get_word2vec
-# Parameters for creating scene graphs
+
 dist_thr = 1.0
 
-# Lazy-loaded 3DSSG data (objects.json / relationships.json)
 _scans_dict = None
 _relationships_dict = None
 
+
 def _load_3dssg_data():
+    """Lazily loads and caches 3DSSG objects.json and relationships.json.
+
+    Returns:
+        Tuple of (scans_dict, relationships_dict) keyed by scan ID.
+    """
     global _scans_dict, _relationships_dict
     if _scans_dict is not None:
         return _scans_dict, _relationships_dict
@@ -38,28 +44,50 @@ def _load_3dssg_data():
 
     return _scans_dict, _relationships_dict
 
+
 def process_scenes(dir_to_scenes, plot=False, dist_thr=1.0):
+    """Processes all 3RScan scenes into graph dictionaries.
+
+    Args:
+        dir_to_scenes: Parent directory containing ``3RScan/<scan_id>/``.
+        plot: If True, visualise bounding boxes and relations.
+        dist_thr: Maximum edge distance threshold.
+
+    Returns:
+        Dictionary mapping scan IDs to scene dicts with ``objects`` and
+        ``relationships`` keys.
+    """
     scans_dict, relationships_dict = _load_3dssg_data()
     ids = os.listdir(os.path.join(dir_to_scenes, '3RScan'))
     scenes = {}
     for id in tqdm(ids):
-        print(f'Processing scene {id}')
         try:
             scene = {}
             scene['objects'], scene['relationships'] = process_objects_and_relationships(dir_to_scenes, id, plot, dist_thr)
-            assert(id not in scenes)
+            assert id not in scenes, f"Duplicate scene ID: {id}"
             scenes[id] = scene
         except Exception as e:
             print(f'Error processing scene {id}: {e}')
 
-    assert(len(scenes) == len(relationships_dict))
+    assert len(scenes) == len(relationships_dict), "Scene count mismatch"
     return scenes
 
+
 def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist_thr=1.0):
+    """Processes objects and relationships for a single 3RScan scene.
+
+    Args:
+        dir_to_objects: Parent directory containing ``3RScan/<scene_id>/``.
+        scene_id: The 3RScan scene identifier.
+        plot: If True, visualise bounding boxes and relations.
+        dist_thr: Maximum edge distance threshold for plotting.
+
+    Returns:
+        Tuple of (objects_in_scan, graph_adj) where objects_in_scan is a dict
+        of object dicts and graph_adj maps object IDs to adjacency info.
+    """
     scans_dict, relationships_dict = _load_3dssg_data()
-    # Path for segmentations
     segmentations_path = os.path.join(dir_to_objects, '3RScan', scene_id, 'semseg.v2.json')
-    segmentations = {}
     with open(segmentations_path, 'r') as f:
         segmentations = json.load(f)
     segmentations = segmentations['segGroups']
@@ -69,11 +97,8 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
 
     objects_in_scan = pd.DataFrame(objects_in_scan)
     objects_in_scan = objects_in_scan.drop(columns=['nyu40', 'ply_color', 'eigen13', 'rio27', 'affordances', 'state_affordances', 'symmetry'], errors='ignore')
-
-    # Convert back to list of dicts
     objects_in_scan = objects_in_scan.set_index('id', drop=False).to_dict('index')
 
-    # Turn segmentation into a dict indexed by id
     segmentations_dict = {}
     for seg in segmentations:
         segmentations_dict[str(seg['id'])] = seg
@@ -83,24 +108,22 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    # Add segmentation to objects_in_scan per object
     for obj_id in objects_in_scan.keys():
         obj = objects_in_scan[obj_id]
         assert obj['label'] == segmentations_dict[obj_id]['label']
         obj['obb'] = segmentations_dict[obj['id']]['obb']
 
-        if (plot):
+        if plot:
             bounding_box(obj, ax, plot=True)
 
         graph_adj[obj_id] = {'label': obj['label'], 'adj_to': []}
 
-    # Process relationships
-    assert(scene_id in relationships_dict)
+    assert scene_id in relationships_dict, f"Scene {scene_id} not in relationships"
     relationship = relationships_dict[scene_id]
 
     for r in relationship['relationships']:
-        assert(str(r[0]) in graph_adj)
-        assert(str(r[1]) in graph_adj)
+        assert str(r[0]) in graph_adj, f"Object {r[0]} not found"
+        assert str(r[1]) in graph_adj, f"Object {r[1]} not found"
 
         distance = get_obj_distance(str(r[0]), str(r[1]), objects_in_scan)
         if plot and distance < dist_thr:
@@ -113,7 +136,14 @@ def process_objects_and_relationships(dir_to_objects, scene_id, plot=False, dist
 
     return objects_in_scan, graph_adj
 
+
 def add_edge_list(all_scenes, output_path=None):
+    """Adds edge lists with embeddings to each scene in ``all_scenes``.
+
+    Args:
+        all_scenes: Dictionary of scene dicts (modified in place).
+        output_path: If provided, saves the result with ``torch.save``.
+    """
     _, relationships_dict = _load_3dssg_data()
     hada = {}
     hw2v = {}
@@ -134,7 +164,7 @@ def add_edge_list(all_scenes, output_path=None):
             ada, hada = get_clip(rel[3], hada)
             relation_ada_list.append(ada)
             dist_list.append(get_obj_distance(str(rel[0]), str(rel[1]), all_scenes[sceneid]['objects']))
-        assert(len(obj1_list) == len(obj2_list) == len(relation_list) == len(dist_list))
+        assert len(obj1_list) == len(obj2_list) == len(relation_list) == len(dist_list)
         all_scenes[sceneid]['edge_lists'] = {}
         all_scenes[sceneid]['edge_lists']['from'] = obj1_list
         all_scenes[sceneid]['edge_lists']['to'] = obj2_list
@@ -145,7 +175,14 @@ def add_edge_list(all_scenes, output_path=None):
     if output_path:
         torch.save(all_scenes, output_path)
 
+
 def add_node_features(all_scenes, output_path=None):
+    """Adds label and attribute embeddings to each node in ``all_scenes``.
+
+    Args:
+        all_scenes: Dictionary of scene dicts (modified in place).
+        output_path: If provided, saves the result with ``torch.save``.
+    """
     hada = {}
     hw2v = {}
     print(len(all_scenes))
@@ -171,7 +208,14 @@ def add_node_features(all_scenes, output_path=None):
     if output_path:
         torch.save(all_scenes, output_path)
 
+
 def check_num_edges(all_scenes):
+    """Verifies that edge list counts match adjacency list counts.
+
+    Args:
+        all_scenes: Dictionary of scene dicts with both ``edge_lists``
+            and ``relationships`` keys.
+    """
     _, relationships_dict = _load_3dssg_data()
     num_edges = []
     adj_num_edges = []
@@ -184,10 +228,12 @@ def check_num_edges(all_scenes):
             scene_sum += adj_to
         adj_num_edges.append(scene_sum)
 
-    assert(len(num_edges) == len(adj_num_edges))
-    assert(all(num_edges[i] == adj_num_edges[i] for i in range(len(num_edges))))
+    assert len(num_edges) == len(adj_num_edges)
+    assert all(num_edges[i] == adj_num_edges[i] for i in range(len(num_edges)))
+
 
 def change_w2v_word2vec(all_scenes, p):
+    """Renames ``attributes_w2v`` keys to ``attributes_word2vec``. Deprecated."""
     for scene_id in tqdm(all_scenes):
         for node_id in all_scenes[scene_id]['objects']:
             node = all_scenes[scene_id]['objects'][node_id]

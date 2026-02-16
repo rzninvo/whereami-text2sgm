@@ -1,31 +1,58 @@
+"""Graph-to-graph matching model using Transformer convolutions with cross-attention."""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import MessagePassing, TransformerConv, GCNConv
-from torch_geometric.nn import aggr, pool
+from torch_geometric.nn import MessagePassing, TransformerConv
 
 from whereami.utils.utils import make_cross_graph
-        
+
+
 class SimpleTConv(MessagePassing):
+    """Single Transformer convolution layer with additive aggregation.
+
+    Applies a TransformerConv followed by LeakyReLU activation.
+
+    Args:
+        in_n: Input node feature dimension.
+        in_e: Input edge feature dimension.
+        out_n: Output node feature dimension.
+        heads: Number of attention heads.
+    """
+
     def __init__(self, in_n, in_e, out_n, heads):
-        # super().__init__(aggr=aggr.AttentionalAggregation(gate_nn=nn.Sequential(
-        #     nn.Linear(out_n, out_n),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(out_n, out_n),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(out_n, 1)
-        # )))
         super().__init__(aggr='add')
         self.TConv = TransformerConv(in_n, out_n, concat=False, heads=heads, dropout=0.5, edge_dim=in_e)
         self.act = nn.LeakyReLU()
 
     def forward(self, x, edge_index, edge_attr):
+        """Applies Transformer convolution and activation.
+
+        Args:
+            x: Node feature tensor of shape ``(num_nodes, in_n)``.
+            edge_index: Edge index tensor of shape ``(2, num_edges)``.
+            edge_attr: Edge attribute tensor of shape ``(num_edges, in_e)``.
+
+        Returns:
+            Updated node features of shape ``(num_nodes, out_n)``.
+        """
         x = self.TConv(x, edge_index, edge_attr)
-        # x = self.propagate(edge_index, x=x)
         x = self.act(x)
         return x
 
+
 class BigGNN(nn.Module):
+    """Graph neural network for text-to-scene-graph matching.
+
+    Uses N layers of self-attention (TransformerConv) on each graph followed by
+    cross-attention between the two graphs, then mean-pools and feeds concatenated
+    embeddings through an MLP to produce a matching score.
+
+    Args:
+        N: Number of self-attention + cross-attention layer pairs.
+        heads: Number of attention heads per TransformerConv.
+        embed_dim: Node and edge embedding dimension.
+    """
 
     def __init__(self, N, heads, embed_dim=300):
         super().__init__()
@@ -45,42 +72,47 @@ class BigGNN(nn.Module):
             nn.Sigmoid()
         )
 
-        # self.pooling = pool.SAGPooling(in_channels=out_n, ratio=0.5)
-
-
     def forward(self, x_1, x_2,
                       edge_idx_1, edge_idx_2,
                       edge_attr_1, edge_attr_2):
-        
+        """Computes a matching score between two graphs.
+
+        Args:
+            x_1: Text graph node features, shape ``(N1, embed_dim)``.
+            x_2: Scene graph node features, shape ``(N2, embed_dim)``.
+            edge_idx_1: Text graph edge index, shape ``(2, E1)``.
+            edge_idx_2: Scene graph edge index, shape ``(2, E2)``.
+            edge_attr_1: Text graph edge features, shape ``(E1, embed_dim)``.
+            edge_attr_2: Scene graph edge features, shape ``(E2, embed_dim)``.
+
+        Returns:
+            Tuple of (x_1_pooled, x_2_pooled, matching_score) where pooled
+            tensors have shape ``(embed_dim,)`` and matching_score is a scalar
+            in ``[0, 1]``.
+        """
         for i in range(self.N):
-            ############# Self Attention #############
+            # Self-attention
             x_1 = self.TSALayers[i](x_1, edge_idx_1, edge_attr_1)
             x_2 = self.GSALayers[i](x_2, edge_idx_2, edge_attr_2)
-            ############# Self Attention #############
-            # x_1_pooled = torch.mean(x_1, dim=0)
-            # x_2_pooled = torch.mean(x_2, dim=0)
-            # return x_1_pooled, x_2_pooled, torch.tensor(0.5)
 
-            ############# Cross Attention #############
+            # Cross-attention: concatenate graphs, apply cross-conv, then slice
+            # back to original sizes
             len_x_1 = x_1.shape[0]
             len_x_2 = x_2.shape[0]
-            edge_index_1_cross, edge_attr_1_cross = make_cross_graph(x_1.shape, x_2.shape) # First half of x_1_cross should be the original x_1
-            edge_index_2_cross, edge_attr_2_cross = make_cross_graph(x_2.shape, x_1.shape) # First half of x_2_cross should be the original x_2
+            edge_index_1_cross, edge_attr_1_cross = make_cross_graph(x_1.shape, x_2.shape)
+            edge_index_2_cross, edge_attr_2_cross = make_cross_graph(x_2.shape, x_1.shape)
             x_1_cross = torch.cat((x_1, x_2), dim=0)
             x_2_cross = torch.cat((x_2, x_1), dim=0)
             x_1_cross = self.TCALayers[i](x_1_cross.to('cuda'), edge_index_1_cross.to('cuda'), edge_attr_1_cross.to('cuda'))
             x_2_cross = self.GCALayers[i](x_2_cross.to('cuda'), edge_index_2_cross.to('cuda'), edge_attr_2_cross.to('cuda'))
-            x_1 = x_1_cross[:len_x_1] # TODO: Oh, this could be weird....... need to make sure the nodes and indices line up here
+            x_1 = x_1_cross[:len_x_1]
             x_2 = x_2_cross[:len_x_2]
-            ############# Cross Attention #############
-            # x_1 = F.normalize(x_1, p=2, dim=1)
-            # x_2 = F.normalize(x_2, p=2, dim=1)
-        
-        # mean pooling
+
+        # Mean pooling
         x_1_pooled = torch.mean(x_1, dim=0)
         x_2_pooled = torch.mean(x_2, dim=0)
 
-        # Concatenate and feed into SceneTextMLP
+        # Concatenate and feed into matching MLP
         x_concat = torch.cat((x_1_pooled, x_2_pooled), dim=0)
         out_matching = self.SceneText_MLP(x_concat)
         return x_1_pooled, x_2_pooled, out_matching

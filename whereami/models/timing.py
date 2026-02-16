@@ -1,7 +1,21 @@
+"""Timing utilities for benchmarking inference stages."""
+
 import time
 import numpy as np
 
+
 class Timer:
+    """Tracks wall-clock time for embedding, matching-score, and ranking stages.
+
+    Attributes:
+        text2graph_text_embedding_time: Durations for text embedding calls.
+        text2graph_text_embedding_iter: Iteration counts for embedding calls.
+        text2graph_text_embedding_matching_score_time: Durations for score computation.
+        text2graph_text_embedding_matching_score_iter: Iteration counts for score computation.
+        text2graph_matching_time: Durations for the ranking/sorting step.
+        text2graph_matching_iter: Iteration counts for the ranking step.
+    """
+
     def __init__(self):
         self.start_time = time.time()
         self.total_time = 0
@@ -12,17 +26,25 @@ class Timer:
         self.text2graph_text_embedding_matching_score_time = []
         self.text2graph_text_embedding_matching_score_iter = []
 
-        # could be combined with above for a total time
         self.text2graph_matching_time = []
         self.text2graph_matching_iter = []
 
     def save(self, path, args):
-        with open(path, 'w') as f:
-            assert(len(self.text2graph_text_embedding_matching_score_time) == len(self.text2graph_text_embedding_matching_score_iter))
-            assert(len(self.text2graph_matching_time) == len(self.text2graph_matching_iter))
-            assert(sum(self.text2graph_matching_iter) == args.eval_iters * args.eval_iter_count)
+        """Writes aggregated timing statistics to a text file.
 
-            # save all the variables and values
+        Args:
+            path: Destination file path.
+            args: Parsed arguments namespace (uses ``eval_iters``,
+                ``eval_iter_count``, ``out_of``).
+        """
+        with open(path, 'w') as f:
+            assert len(self.text2graph_text_embedding_matching_score_time) == len(self.text2graph_text_embedding_matching_score_iter), \
+                "Mismatch between score times and score iteration counts"
+            assert len(self.text2graph_matching_time) == len(self.text2graph_matching_iter), \
+                "Mismatch between matching times and matching iteration counts"
+            assert sum(self.text2graph_matching_iter) == args.eval_iters * args.eval_iter_count, \
+                "Total matching iterations does not match eval_iters * eval_iter_count"
+
             f.write(f'start_time: {self.start_time}\n')
             f.write(f'total_time: {self.total_time}\n')
             f.write(f'text2graph_text_embedding_time: {sum(self.text2graph_text_embedding_time)}\n')
@@ -36,7 +58,6 @@ class Timer:
             time_for_matching_score = sum(self.text2graph_text_embedding_matching_score_time) / sum(self.text2graph_text_embedding_matching_score_iter)
             time_for_matching = sum(self.text2graph_matching_time) / sum(self.text2graph_matching_iter)
 
-            # also save text2graph_text_embedding_matching_score_time_per_iter, text2graph_matching_time_per_iter
             f.write(f'Embedding time, avg time for 1 encode_text(str): {time_for_embedding}\n')
             f.write(f'Std of embedding time: {np.std(self.text2graph_text_embedding_time)}\n')
             f.write(f'Matching score time, avg time for 1 matching score: {time_for_matching_score}\n')
@@ -45,5 +66,4 @@ class Timer:
             f.write(f'Std of matching time: {np.std(self.text2graph_matching_time)}\n')
 
             calc_time = time_for_embedding + time_for_matching_score * args.out_of + time_for_matching
-            # save total run time
             f.write(f'Total run time for 1 text matching against {args.out_of} database scenes: {calc_time}\n')

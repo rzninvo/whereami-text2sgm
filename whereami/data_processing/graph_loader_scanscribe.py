@@ -1,17 +1,27 @@
+"""ScanScribe scene graph loader: parses JSON descriptions into enriched scene dicts."""
+
 import os
 import json
 import torch
 from tqdm import tqdm
-import re
 
 from whereami.data_processing.graph_loader_utils import get_ada, get_word2vec, check_and_remove_invalid_edges
 from whereami.utils.utils import txt_to_json
 
+
 def process_scenes_to_dict(dir_to_scenes):
+    """Reads all ScanScribe JSON scene files into a nested dictionary.
+
+    Args:
+        dir_to_scenes: Path to directory containing per-scene subdirectories,
+            each with numbered ``.json`` files.
+
+    Returns:
+        Dictionary mapping scene IDs to dicts of ``{text_id: parsed_json}``.
+    """
     ids = os.listdir(dir_to_scenes)
     scenes = {}
     for id in tqdm(ids):
-        # print(f'Processing scene {id}')
         try:
             scene_dir = sorted([int(x[:-5]) for x in os.listdir(os.path.join(dir_to_scenes, id))])
             scene = {}
@@ -29,6 +39,15 @@ def process_scenes_to_dict(dir_to_scenes):
     return scenes
                 
 def add_edge_features(all_scenes):
+    """Adds Ada and word2vec embeddings for edge relationships in all scenes.
+
+    Args:
+        all_scenes: Nested dict of ``{scene_id: {text_id: graph_dict}}``.
+
+    Returns:
+        The same dictionary with ``'relation_ada'`` and ``'relation_word2vec'``
+        fields added to each edge.
+    """
     hada = {}
     hw2v = {}
     for scene_id in tqdm(all_scenes):
@@ -40,6 +59,16 @@ def add_edge_features(all_scenes):
     return all_scenes
 
 def add_node_features(all_scenes):
+    """Adds Ada and word2vec embeddings for node labels and attributes in all scenes.
+
+    Args:
+        all_scenes: Nested dict of ``{scene_id: {text_id: graph_dict}}``.
+
+    Returns:
+        The same dictionary with ``'label_ada'``, ``'label_word2vec'``,
+        ``'attributes_ada'``, and ``'attributes_word2vec'`` fields added
+        to each node.
+    """
     hada = {}
     hw2v = {}
     for scene_id in tqdm(all_scenes):

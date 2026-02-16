@@ -1,33 +1,35 @@
+"""Text embedding creation using OpenAI Ada, spaCy word2vec, and CLIP backends."""
+
 from typing import List
 
 import openai
-import argparse
 import numpy as np
 import torch
 import json
 import os
 import tiktoken
 import tqdm
-import sys
 
 from whereami.utils.utils import load_text_dataset
 
-# -------------------------------------------------------------------------------------------
-# Lazy-loaded spaCy model
 _nlp = None
 
+
 def _get_nlp():
+    """Returns the lazily-loaded spaCy ``en_core_web_lg`` model."""
     global _nlp
     if _nlp is None:
         import spacy
         _nlp = spacy.load("en_core_web_lg")
     return _nlp
 
-# Lazy-loaded CLIP tokenizer & model
+
 _clip_tokenizer = None
 _clip_model = None
 
+
 def _get_clip():
+    """Returns the lazily-loaded CLIP tokenizer and model."""
     global _clip_tokenizer, _clip_model
     if _clip_tokenizer is None:
         from transformers import CLIPTokenizer, CLIPModel
@@ -35,43 +37,73 @@ def _get_clip():
         _clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True)
     return _clip_tokenizer, _clip_model
 
-# -------------------------------------------------------------------------------------------
 
-# Load OpenAI API key from environment
 api_key = os.environ.get("OPENAI_API_KEY", "")
 openai.api_key = api_key
 
+
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
+    """Returns the number of tokens in a text string.
+
+    Args:
+        string: Text to tokenize.
+        encoding_name: Name of the tiktoken encoding (e.g. ``'cl100k_base'``).
+
+    Returns:
+        Token count.
+    """
     encoding = tiktoken.get_encoding(encoding_name)
     num_tokens = len(encoding.encode(string))
     return num_tokens
 
+
 def num_tokens_from_list_of_strings(list_of_strings: List[str], encoding_name: str) -> int:
-    """Returns the number of tokens in a list of text strings."""
+    """Returns the total number of tokens across a list of text strings.
+
+    Args:
+        list_of_strings: Texts to tokenize.
+        encoding_name: Name of the tiktoken encoding.
+
+    Returns:
+        Total token count.
+    """
     num_tokens = 0
     for string in list_of_strings:
         num_tokens += num_tokens_from_string(string, encoding_name)
     return num_tokens
 
+
 def num_tokens_from_dict(dict_of_texts: dict, encoding_name: str) -> int:
-    """Returns the number of tokens in a dictionary of text strings."""
+    """Returns the total number of tokens across all texts in a dictionary.
+
+    Args:
+        dict_of_texts: Mapping from scan IDs to lists of text strings.
+        encoding_name: Name of the tiktoken encoding.
+
+    Returns:
+        Total token count.
+    """
     num_tokens = 0
     for scan_id in dict_of_texts:
         num_tokens += num_tokens_from_list_of_strings(dict_of_texts[scan_id], encoding_name)
-    return 
-    
+    return num_tokens
+
+
 def check_tokens():
+    """Prints the total token count for the default text dataset."""
     scan_ids, dict_of_texts = load_text_dataset()
     num_tokens = num_tokens_from_dict(dict_of_texts, 'cl100k_base')
     print(num_tokens)
-    
-# -------------------------------------------------------------------------------------------
-# Function to create an embedding using OpenAI's API
-# CHANGED to implement clip embeddings
+
+
 def create_embedding_clip(text: str) -> torch.Tensor:
-    """
-    Returns a 512-dimensional CLIP text embedding for the given string.
+    """Returns a 512-dimensional CLIP text embedding for the given string.
+
+    Args:
+        text: Input text to embed.
+
+    Returns:
+        A 512-dim tensor.
     """
     tokenizer, model = _get_clip()
     inputs = tokenizer(
@@ -82,14 +114,19 @@ def create_embedding_clip(text: str) -> torch.Tensor:
         return_tensors="pt"
     )
     with torch.no_grad():
-        outputs   = model.get_text_features(**inputs)
+        outputs = model.get_text_features(**inputs)
         embedding = outputs.squeeze(0)
     return embedding
 
-# CHANGED to implement clip embeddings (optional batch version)
+
 def create_embeddings_clip_batch(texts: list[str]) -> torch.Tensor:
-    """
-    Returns an (N × 512) tensor of CLIP embeddings for a list of N strings.
+    """Returns an (N x 512) tensor of CLIP embeddings for a list of N strings.
+
+    Args:
+        texts: List of input texts to embed.
+
+    Returns:
+        An ``(N, 512)`` tensor.
     """
     tokenizer, model = _get_clip()
     inputs = tokenizer(
@@ -100,11 +137,19 @@ def create_embeddings_clip_batch(texts: list[str]) -> torch.Tensor:
         return_tensors="pt"
     )
     with torch.no_grad():
-        outputs = model.get_text_features(**inputs)  # (N, 512)
+        outputs = model.get_text_features(**inputs)
     return outputs
-# -------------------------------------------------------------------------------------------
+
 
 def create_embedding(text):
+    """Creates an Ada-002 embedding via the OpenAI API.
+
+    Args:
+        text: Input text to embed.
+
+    Returns:
+        List of floats (1536-dim embedding).
+    """
     response = openai.Embedding.create(
         input=text,
         model="text-embedding-ada-002"
@@ -112,7 +157,16 @@ def create_embedding(text):
     embedding = response['data'][0]['embedding']
     return embedding
 
+
 def tokenize_text(filename):
+    """Embeds all texts in a dataset file using the Ada API.
+
+    Args:
+        filename: Dataset filename to load via ``load_text_dataset``.
+
+    Returns:
+        Dictionary mapping scan IDs to lists of Ada embeddings.
+    """
     scan_ids, dict_of_texts = load_text_dataset(filename)
     dict_of_embeddings = {}
     for scan_id in tqdm.tqdm(dict_of_texts):
@@ -122,14 +176,24 @@ def tokenize_text(filename):
             dict_of_embeddings[scan_id].append(embedding)
     return dict_of_embeddings
 
+
 def create_embedding_nlp(text):
-    # spacy embedding
+    """Creates a 300-dim spaCy word2vec embedding.
+
+    Args:
+        text: Input text to embed.
+
+    Returns:
+        A 300-dim numpy array.
+    """
     doc = _get_nlp()(text)
     embedding = doc.vector
-    assert(len(embedding) == 300)
+    assert len(embedding) == 300, "Expected 300-dim spaCy vector"
     return embedding
 
+
 def test_ada_embedding():
+    """Prints cosine similarities between sample Ada embeddings for debugging."""
     worda = 'shelf'
     atta = ['brown']
     wordb = 'floor'
@@ -148,11 +212,12 @@ def test_ada_embedding():
     emba_weighted_sum = np.add(emba, 0.2*avg_atta)
     embb_weighted_sum = np.add(embb, 0.2*avg_attb)
 
-    # cosine similarity
     print(f'cosine ab: {np.dot(emba, embb) / (np.linalg.norm(emba) * np.linalg.norm(embb))}')
     print(f'cosine ab weighted sum: {np.dot(emba_weighted_sum, embb_weighted_sum) / (np.linalg.norm(emba_weighted_sum) * np.linalg.norm(embb_weighted_sum))}')
 
+
 def test_nlp_embedding():
+    """Prints cosine similarities between sample spaCy embeddings for debugging."""
     worda = 'shelf'
     wordb = 'bookshelf'
     wordc = 'yellow'
@@ -160,58 +225,25 @@ def test_nlp_embedding():
     emba = create_embedding_nlp(worda)
     embb = np.add(create_embedding_nlp(wordb), create_embedding_nlp(wordc))
     embd = create_embedding_nlp(wordd)
-    # cosine similarity
     print(f'cosine ab: {np.dot(emba, embb) / (np.linalg.norm(emba) * np.linalg.norm(embb))}')
-    # print(f'cosine ac: {np.dot(emba, embc) / (np.linalg.norm(emba) * np.linalg.norm(embc))}')
     print(f'cosine ad: {np.dot(emba, embd) / (np.linalg.norm(emba) * np.linalg.norm(embd))}')
-    # print(f'cosine bc: {np.dot(embb, embc) / (np.linalg.norm(embb) * np.linalg.norm(embc))}')
     print(f'cosine bd: {np.dot(embb, embd) / (np.linalg.norm(embb) * np.linalg.norm(embd))}')
-    # print(f'cosine cd: {np.dot(embc, embd) / (np.linalg.norm(embc) * np.linalg.norm(embd))}')
+
 
 if __name__ == '__main__':
-    test_ada_embedding()
-    exit()
+    import argparse
 
-    ## check_tokens()
-    ############################### Create embeddings for text dataset
     parser = argparse.ArgumentParser()
-    parser.add_argument('--filename', type=str, default=None)
+    parser.add_argument('--test_ada', action='store_true', help='Run Ada embedding test')
+    parser.add_argument('--filename', type=str, default=None, help='Dataset filename to embed')
     args = parser.parse_args()
 
-    embeddings = tokenize_text(args.filename)
-
-    # save
-    scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'hugging_face')
-    with open(os.path.join(scripts_dir, 'scanscribe_2_embeddings.json'), 'w') as fp:
-        json.dump(embeddings, fp)
-    
-    # dict_of_embeddings = tokenize_text(args.filename)
-    # torch.save(dict_of_embeddings, 'human+GPT_cleaned_text_embedding_ada_002.pt')
-
-# ################################ Take user input to create a smaller dataset
-    # scans_ids, dict_of_texts = load_text_dataset(args.filename)
-    # dict_selection = {}
-    # for key in dict_of_texts:
-    #     # Go through all the examples in each dict_of_texts[key]
-    #     user_input = input("Exit overall?")
-    #     if user_input == 'exit':
-    #         break
-    #     else:
-    #         pass
-    #     for text in dict_of_texts[key]:
-    #         print("Text: ", text)
-        
-    #         user_input = input("Add to dict_selection? (y/n): ")
-    #         if user_input == 'y':
-    #             if key not in dict_selection:
-    #                 dict_selection[key] = []
-    #             dict_selection[key].append(text)
-    #         elif user_input == 'q':
-    #             break
-    #         else:
-    #             continue
-
-    # # Save dict_selection as a json in the ../scripts/hugging_face/ folder
-    # with open('../scripts/hugging_face/scanscribe_2.json', 'w') as fp:
-    #     json.dump(dict_selection, fp)
-# ################################ Take user input to create a smaller dataset
+    if args.test_ada:
+        test_ada_embedding()
+    elif args.filename:
+        embeddings = tokenize_text(args.filename)
+        scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'hugging_face')
+        with open(os.path.join(scripts_dir, 'scanscribe_2_embeddings.json'), 'w') as fp:
+            json.dump(embeddings, fp)
+    else:
+        parser.print_help()

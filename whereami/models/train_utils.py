@@ -1,17 +1,27 @@
+"""Training utilities: k-fold splitting and custom cross-entropy loss."""
+
 import time
-import argparse
 import torch
 import torch.nn.functional as F
 from sklearn.model_selection import KFold
 from tqdm import tqdm
 import numpy as np
-import wandb
 import random
-import matplotlib.pyplot as plt
 
 from whereami.data_processing.scene_graph import SceneGraph
 
+
 def k_fold(dataset, folds):
+    """Splits a dataset into k folds using KFold (non-stratified).
+
+    Args:
+        dataset: The dataset to split (only its length is used).
+        folds: Number of folds.
+
+    Returns:
+        Tuple of (train_indices, test_indices, val_indices), each a list
+        of ``folds`` tensors of indices.
+    """
     skf = KFold(folds, shuffle=True, random_state=12345)
     test_indices, train_indices = [], []
     for _, idx in skf.split(torch.zeros(len(dataset))):
@@ -25,45 +35,53 @@ def k_fold(dataset, folds):
 
     return train_indices, test_indices, val_indices
 
-def cross_entropy(preds, targets, reduction='none', dim=-1): # TODO: This could be why the loss never goes above 1
-    log_softmax = torch.nn.LogSoftmax(dim=dim) 
+
+def cross_entropy(preds, targets, reduction='none', dim=-1):
+    """Computes cross-entropy loss between predictions and soft targets.
+
+    Args:
+        preds: Prediction logits tensor.
+        targets: Target distribution tensor (same shape as preds).
+        reduction: ``'none'`` to return per-sample loss, ``'mean'`` for scalar.
+        dim: Dimension along which to apply log-softmax.
+
+    Returns:
+        Loss tensor (per-sample if reduction is ``'none'``, scalar if ``'mean'``).
+    """
+    log_softmax = torch.nn.LogSoftmax(dim=dim)
     loss = (-targets * log_softmax(preds)).sum(1)
-    assert(all(loss >= 0))
+    assert all(loss >= 0), "Cross-entropy loss must be non-negative"
     if reduction == "none":
         return loss
     elif reduction == "mean":
-        return loss.mean()    
+        return loss.mean()
+
 
 def k_fold_by_scene(dataset, folds: int):
-    '''
-    dataset: should be a list of SceneGraphs
-    '''
-    # Separate the dataset by scene
-    scene_dataset = {} # mapping from scene name to list of indices from the dataset
+    """Splits a dataset into k folds ensuring all graphs from the same scene
+    stay in the same fold.
+
+    Args:
+        dataset: List of SceneGraph instances.
+        folds: Number of folds.
+
+    Returns:
+        Iterator of (train_indices, val_indices) tuples.
+    """
+    scene_dataset = {}
     for i, graph in enumerate(dataset):
         if graph.scene_id not in scene_dataset:
             scene_dataset[graph.scene_id] = []
         scene_dataset[graph.scene_id].append(i)
 
-    # Create the folds based on the scene name
     random.seed(0)
     scene_names = list(scene_dataset.keys())
     random.shuffle(scene_names)
     fold_size = len(scene_names) // folds
     train_indices, val_indices = [], []
-    train_scene_names_to_check, val_scene_names_to_check = [], []
     for i in range(folds):
         val_scene_names = scene_names[i * fold_size : (i + 1) * fold_size]
         val_indices.append([idx for scene_name in val_scene_names for idx in scene_dataset[scene_name]])
         train_indices.append([idx for scene_name in scene_names if scene_name not in val_scene_names for idx in scene_dataset[scene_name]])
-        val_scene_names_to_check.append(val_scene_names)
-        train_scene_names_to_check.append([scene_name for scene_name in scene_names if scene_name not in val_scene_names])
-
-    # with open(f'./training_scene_ids.txt', 'r') as f:
-    #     for i, scene_name_list in enumerate(train_scene_names_to_check):
-    #         assert(str(scene_name_list) == f.readline().strip())
-    # with open(f'./testing_scene_ids.txt', 'r') as f:
-    #     for i, scene_name_list in enumerate(val_scene_names_to_check):
-    #         assert(str(scene_name_list) == f.readline().strip())
 
     return zip(train_indices, val_indices)

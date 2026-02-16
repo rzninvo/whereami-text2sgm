@@ -1,18 +1,14 @@
+"""Evaluation script for trained BigGNN models on ScanScribe, human, and ScanNet test sets."""
+
 import time
-import argparse
-import sys
 from pathlib import Path
 import torch
-import torch.cuda
-from sklearn.model_selection import StratifiedKFold
 from tqdm import tqdm
 import wandb
 import random
 
 from whereami.data_processing.scene_graph import SceneGraph
-from whereami.analysis.helper import get_matching_subgraph, calculate_overlap
 from whereami.models.model_graph2graph import BigGNN
-from whereami.models.train_utils import k_fold, cross_entropy
 from whereami.models.train import eval_acc as eval_fn
 from whereami.models.train import format_to_latex
 from whereami.models.timing import Timer
@@ -73,7 +69,8 @@ if __name__ == "__main__":
     h_graphs_remove = [k for k in h_graphs_test if k.split('_')[0] not in _3dssg_graphs]
     print(f'to remove human_graphs, hopefully none: {h_graphs_remove}')
     for k in h_graphs_remove: del h_graphs_test[k]
-    assert(all([k.split('_')[0] in _3dssg_graphs for k in h_graphs_test]))
+    assert all([k.split('_')[0] in _3dssg_graphs for k in h_graphs_test]), \
+        "All human graph scene IDs must exist in 3DSSG"
     human_graphs_test = {k: SceneGraph(k.split('_')[0],
                                    graph_type='human',
                                    graph=h_graphs_test[k],

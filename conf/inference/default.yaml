@@ -1,6 +1,35 @@
+# =============================================================================
+# Inference settings — controls batch and single-query retrieval.
+#
+# Batch inference (all ScanScribe captions):
+#   python -m whereami.models.inference eval.model_name=my_model
+#
+# Single-query inference (free-text):
+#   python -m whereami.models.single_inference \
+#       inference.query="There is a wooden chair next to a table." \
+#       eval.model_name=my_model
+#
+# The OpenAI API key (for GPT-based text parsing) is read from the
+# OPENAI_API_KEY environment variable. Set it in your .env file.
+# =============================================================================
+
+# Number of top-ranked scenes to return per query.
 top_k: 5
+
+# Optional path to write ranked results as JSON Lines (one line per query).
+# If null, results are only printed to stdout.
 jsonl_out: null
-embedding_type: word2vec    # word2vec | clip | ada
-query: null                 # for single_inference free-text
-api_key_file: null
+
+# Blending weight for the final retrieval score:
+#   score = weight * matching_prob + (1 - weight) * cosine_similarity
+# Set to 1.0 for matching-probability only, 0.0 for cosine-only.
+score_blend_weight: 0.5
+
+# --- Single-query inference (single_inference.py) ---
+
+# Free-text natural language query to match against the 3DSSG database.
+# Required for single_inference; ignored by batch inference.
+query: null
+
+# Enable verbose debug output (raw LLM responses, progress bars, etc.).
 debug: false

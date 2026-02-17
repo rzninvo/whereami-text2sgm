@@ -4,12 +4,13 @@ Bridges:
   - single_inference.py : builds a text SceneGraph from free text (LLM-backed)
   - localization pipeline : object matching, dense grid casting, visualisation
 
+Requires OPENAI_API_KEY in .env or environment.
+
 Usage::
 
     python -m whereami.visualization.visualize_loc_from_query \\
         scan_id=3RScan1234 \\
         inference.query="I can see a sofa facing a TV and a coffee table between them." \\
-        inference.api_key_file=/path/to/openai_api_key.txt \\
         localization.top_k=8 localization.show_heatmap=true localization.show_3d=true
 """
 from __future__ import annotations
@@ -27,29 +28,6 @@ from whereami.localization.grid import load_scene
 from whereami.localization.matching import topk_matched_objects
 from whereami.localization.pipeline import run_loc_pipeline
 from whereami.models.single_inference import text_to_scenegraph
-
-
-def ensure_openai_key(api_key_file: str | None):
-    """Set openai.api_key from file or environment variable.
-
-    Args:
-        api_key_file: Path to file containing ``OPENAI_API_KEY=sk-...`` or
-            just the key. If None, falls back to the ``OPENAI_API_KEY``
-            environment variable.
-
-    Raises:
-        RuntimeError: If no API key is found.
-    """
-    import openai
-    if api_key_file is not None:
-        text = Path(api_key_file).read_text().strip()
-        key = text.split("=", 1)[1] if text.startswith("OPENAI_API_KEY=") else text
-        openai.api_key = key
-    else:
-        if not (getattr(openai, "api_key", None) or os.getenv("OPENAI_API_KEY")):
-            raise RuntimeError(
-                "OpenAI API key not found. Set inference.api_key_file or OPENAI_API_KEY env var."
-            )
 
 
 def load_scene_graph_for_scan(graphs_3dssg_path: str, scan_id: str,
@@ -104,9 +82,9 @@ def run_visualize_loc_from_query(cfg: DictConfig) -> None:
     if cfg.inference.query is None:
         raise ValueError("inference.query is required. Set via CLI: inference.query='...'")
     if cfg.paths.rscan_root is None:
-        raise ValueError("paths.rscan_root is required. Set RSCAN_ROOT env var or override paths.rscan_root=...")
-
-    ensure_openai_key(cfg.inference.api_key_file)
+        raise ValueError("paths.rscan_root is required. Place 3RScan data in ./data/3rscan or override paths.rscan_root=...")
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY not set. Add it to your .env file.")
 
     loc = cfg.localization
 

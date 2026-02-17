@@ -18,11 +18,12 @@ class SimpleTConv(MessagePassing):
         in_e: Input edge feature dimension.
         out_n: Output node feature dimension.
         heads: Number of attention heads.
+        dropout: Dropout probability for attention weights.
     """
 
-    def __init__(self, in_n, in_e, out_n, heads):
+    def __init__(self, in_n, in_e, out_n, heads, dropout=0.5):
         super().__init__(aggr='add')
-        self.TConv = TransformerConv(in_n, out_n, concat=False, heads=heads, dropout=0.5, edge_dim=in_e)
+        self.TConv = TransformerConv(in_n, out_n, concat=False, heads=heads, dropout=dropout, edge_dim=in_e)
         self.act = nn.LeakyReLU()
 
     def forward(self, x, edge_index, edge_attr):
@@ -52,16 +53,17 @@ class BigGNN(nn.Module):
         N: Number of self-attention + cross-attention layer pairs.
         heads: Number of attention heads per TransformerConv.
         embed_dim: Node and edge embedding dimension.
+        dropout: Dropout probability for attention weights.
     """
 
-    def __init__(self, N, heads, embed_dim=300):
+    def __init__(self, N, heads, embed_dim=300, dropout=0.5):
         super().__init__()
         self.N = N
         in_n, in_e, out_n = embed_dim, embed_dim, embed_dim
-        self.TSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
-        self.GSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
-        self.TCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
-        self.GCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads) for _ in range(N)])
+        self.TSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads, dropout) for _ in range(N)])
+        self.GSALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads, dropout) for _ in range(N)])
+        self.TCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads, dropout) for _ in range(N)])
+        self.GCALayers = nn.ModuleList([SimpleTConv(in_n, in_e, out_n, heads, dropout) for _ in range(N)])
 
         self.SceneText_MLP = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim * 2),

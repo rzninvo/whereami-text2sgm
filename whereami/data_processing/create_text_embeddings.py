@@ -27,10 +27,6 @@ def _get_clip():
     return _clip_tokenizer, _clip_model
 
 
-api_key = os.environ.get("OPENAI_API_KEY", "")
-openai.api_key = api_key
-
-
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
     """Returns the number of tokens in a text string.
 

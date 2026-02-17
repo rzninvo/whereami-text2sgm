@@ -1,7 +1,4 @@
-"""Batch text-to-scene retrieval: ScanScribe caption graph to top-k matching 3D-SSG scenes.
-
-Scoring: 0.5 * matching-probability + 0.5 * cosine-similarity (both in [0,1]).
-"""
+"""Batch text-to-scene retrieval: ScanScribe caption graph to top-k matching 3D-SSG scenes."""
 
 from __future__ import annotations
 
@@ -25,7 +22,10 @@ from whereami.models.model_graph2graph import BigGNN
 def compute_match_score(model: BigGNN | None,
                         qg: SceneGraph,
                         sg: SceneGraph,
-                        device: str = "cpu") -> float:
+                        device: str = "cpu",
+                        score_blend_weight: float = 0.5,
+                        dbscan_eps: float = 0.5,
+                        dbscan_min_samples: int = 1) -> float:
     """Computes a blended matching score between a query graph and a scene graph.
 
     Extracts matching subgraphs, converts to PyG format, runs through the model
@@ -36,11 +36,14 @@ def compute_match_score(model: BigGNN | None,
         qg: Query (text) scene graph.
         sg: Database (3DSSG) scene graph.
         device: Torch device string.
+        score_blend_weight: Weight for matching_prob; cosine gets ``(1 - weight)``.
+        dbscan_eps: DBSCAN epsilon parameter for cosine distance.
+        dbscan_min_samples: DBSCAN minimum samples per cluster.
 
     Returns:
-        Blended score in [0, 1]: 0.5 * matching_prob + 0.5 * cosine_sim.
+        Blended score in [0, 1].
     """
-    q_sub, s_sub = get_matching_subgraph(qg, sg)
+    q_sub, s_sub = get_matching_subgraph(qg, sg, dbscan_eps, dbscan_min_samples)
 
     def bad(g):
         return (g is None or len(g.nodes) <= 1
@@ -65,7 +68,8 @@ def compute_match_score(model: BigGNN | None,
 
     q_emb, s_emb, m_p = model(q_n, s_n, q_e, s_e, q_f, s_f)
     cos = (F.cosine_similarity(q_emb, s_emb, dim=0).item() + 1) / 2
-    return 0.5 * m_p.item() + 0.5 * cos
+    w = score_blend_weight
+    return w * m_p.item() + (1 - w) * cos
 
 
 def run_inference(cfg: DictConfig) -> None:
@@ -107,7 +111,7 @@ def run_inference(cfg: DictConfig) -> None:
         raise ValueError("eval.model_name is required. Set via CLI: eval.model_name=my_model")
     ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
 
-    model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+    model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model.eval()
 
@@ -118,7 +122,10 @@ def run_inference(cfg: DictConfig) -> None:
     try:
         for qi, qg in enumerate(queries, 1):
             scores = {
-                sid: compute_match_score(model, qg, sg, device)
+                sid: compute_match_score(model, qg, sg, device,
+                                         cfg.inference.score_blend_weight,
+                                         cfg.graph.dbscan_eps,
+                                         cfg.graph.dbscan_min_samples)
                 for sid, sg in database_3dssg.items()
             }
             best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_k]

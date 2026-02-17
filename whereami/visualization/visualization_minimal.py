@@ -37,20 +37,23 @@ def to_legacy_cpu(mesh_t):
 
 
 @torch.inference_mode()
-def matched_object_ids(model, qg: SceneGraph, sg: SceneGraph):
+def matched_object_ids(model, qg: SceneGraph, sg: SceneGraph,
+                       dbscan_eps: float = 0.5, dbscan_min_samples: int = 1):
     """Returns object IDs matched by BigGNN or the pure-overlap fallback.
 
     Args:
         model: Trained BigGNN model, or None for overlap-only matching.
         qg: Query (text) scene graph.
         sg: Database (3DSSG) scene graph.
+        dbscan_eps: DBSCAN epsilon parameter for cosine distance.
+        dbscan_min_samples: DBSCAN minimum samples per cluster.
 
     Returns:
         List of matched object IDs from the scene graph.
     """
     if model is None:
         print("No GNN model; using pure-overlap matcher")
-        _, sub3d = get_matching_subgraph(qg, sg)
+        _, sub3d = get_matching_subgraph(qg, sg, dbscan_eps, dbscan_min_samples)
         return [] if sub3d is None else list(sub3d.nodes)
     device = next(model.parameters()).device
     def prep(g):
@@ -63,7 +66,7 @@ def matched_object_ids(model, qg: SceneGraph, sg: SceneGraph):
     x_n, x_e, x_f = prep(qg)
     p_n, p_e, p_f = prep(sg)
     _ = model(x_n, p_n, x_e, p_e, x_f, p_f)
-    _, sub3d = get_matching_subgraph(qg, sg)
+    _, sub3d = get_matching_subgraph(qg, sg, dbscan_eps, dbscan_min_samples)
     return [] if sub3d is None else list(sub3d.nodes)
 
 
@@ -80,7 +83,7 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
     if cfg.scan_id is None:
         raise ValueError("scan_id is required. Set via CLI: scan_id=XXXX")
     if cfg.paths.rscan_root is None:
-        raise ValueError("paths.rscan_root is required. Set RSCAN_ROOT env var or override paths.rscan_root=...")
+        raise ValueError("paths.rscan_root is required. Place 3RScan data in ./data/3rscan or override paths.rscan_root=...")
 
     scan_id = cfg.scan_id
     scan_dir = Path(cfg.paths.rscan_root) / scan_id
@@ -117,7 +120,7 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
             raise ImportError("BigGNN not available")
         ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
         ckpt = torch.load(ckpt_path, map_location=device)
-        model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+        model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         model.load_state_dict(ckpt)
         model.eval()
 
@@ -125,7 +128,9 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
     mesh, _, obj2faces = load_scene(scan_dir)
 
     for cap_key, qg in captions.items():
-        matched = matched_object_ids(model, qg, sg)
+        matched = matched_object_ids(model, qg, sg,
+                                     cfg.graph.dbscan_eps,
+                                     cfg.graph.dbscan_min_samples)
         print(f"\n─────── {cap_key} ───────")
         print("Matched object IDs:", matched)
         print("SPACE/ENTER → next    |    q/Esc → quit")

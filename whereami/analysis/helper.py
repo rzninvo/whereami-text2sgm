@@ -82,7 +82,7 @@ def combine_node_features(graph1, graph2):
     return all_node_features, all_node_graph_index
 
 
-def get_matching_subgraph(graph1, graph2):
+def get_matching_subgraph(graph1, graph2, dbscan_eps=0.5, dbscan_min_samples=1):
     """Extracts matching subgraphs from two scene graphs using DBSCAN clustering.
 
     Clusters all nodes from both graphs by feature similarity, then keeps
@@ -91,6 +91,8 @@ def get_matching_subgraph(graph1, graph2):
     Args:
         graph1: First SceneGraph (e.g. text query graph).
         graph2: Second SceneGraph (e.g. 3DSSG scene graph).
+        dbscan_eps: DBSCAN epsilon parameter for cosine distance.
+        dbscan_min_samples: DBSCAN minimum samples per cluster.
 
     Returns:
         Tuple of (subgraph1, subgraph2) as SceneGraph objects, or None
@@ -106,7 +108,7 @@ def get_matching_subgraph(graph1, graph2):
     for i, idx in enumerate(combined_node_idx):
         idx_mapping[i] = idx
 
-    clustering = DBSCAN(eps=0.5, min_samples=1, metric='cosine').fit(all_node_features)
+    clustering = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples, metric='cosine').fit(all_node_features)
     clusters = {}
     for i, cluster in enumerate(clustering.labels_):
         if cluster in clusters:

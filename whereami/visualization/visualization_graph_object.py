@@ -27,7 +27,10 @@ from whereami.localization.visualization import colour_objects
 
 
 @torch.inference_mode()
-def compute_match_score(model, qg: SceneGraph, sg: SceneGraph, device: str):
+def compute_match_score(model, qg: SceneGraph, sg: SceneGraph, device: str,
+                        score_blend_weight: float = 0.5,
+                        dbscan_eps: float = 0.5,
+                        dbscan_min_samples: int = 1):
     """Computes a blended matching score between a query graph and a scene graph.
 
     Extracts matching subgraphs, converts to PyG format, runs through the model,
@@ -38,11 +41,14 @@ def compute_match_score(model, qg: SceneGraph, sg: SceneGraph, device: str):
         qg: Query (text) scene graph.
         sg: Database (3DSSG) scene graph.
         device: Torch device string.
+        score_blend_weight: Weight for matching_prob; cosine gets ``(1 - weight)``.
+        dbscan_eps: DBSCAN epsilon parameter for cosine distance.
+        dbscan_min_samples: DBSCAN minimum samples per cluster.
 
     Returns:
-        Blended score: 0.5 * matching_prob + 0.5 * cosine_sim.
+        Blended score in [0, 1].
     """
-    q_sub, s_sub = get_matching_subgraph(qg, sg)
+    q_sub, s_sub = get_matching_subgraph(qg, sg, dbscan_eps, dbscan_min_samples)
 
     def is_degenerate(g: SceneGraph):
         return (g is None or
@@ -65,10 +71,12 @@ def compute_match_score(model, qg: SceneGraph, sg: SceneGraph, device: str):
     x_p, p_p, m_p = model(x_n, p_n, x_e, p_e, x_f, p_f)
 
     cos_sim = (F.cosine_similarity(x_p, p_p, dim=0).item() + 1.0) / 2.0
-    return 0.5 * m_p.item() + 0.5 * cos_sim
+    w = score_blend_weight
+    return w * m_p.item() + (1 - w) * cos_sim
 
 
-def visualize_match(scan_root: Path, qg: SceneGraph, sg: SceneGraph):
+def visualize_match(scan_root: Path, qg: SceneGraph, sg: SceneGraph,
+                    dbscan_eps: float = 0.5, dbscan_min_samples: int = 1):
     """Visualizes a single query-graph vs one scene-graph.
 
     Loads the mesh, finds matched objects via DBSCAN overlap, colours them,
@@ -78,8 +86,10 @@ def visualize_match(scan_root: Path, qg: SceneGraph, sg: SceneGraph):
         scan_root: Parent directory containing scan subdirectories.
         qg: Query (text) scene graph.
         sg: Database (3DSSG) scene graph.
+        dbscan_eps: DBSCAN epsilon parameter for cosine distance.
+        dbscan_min_samples: DBSCAN minimum samples per cluster.
     """
-    _, sub3d = get_matching_subgraph(qg, sg)
+    _, sub3d = get_matching_subgraph(qg, sg, dbscan_eps, dbscan_min_samples)
     matched = list(sub3d.nodes) if sub3d else []
 
     mesh, _, obj2faces = load_scene(scan_root / sg.scene_id)
@@ -111,7 +121,7 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if cfg.paths.rscan_root is None:
-        raise ValueError("paths.rscan_root is required. Set RSCAN_ROOT env var or override paths.rscan_root=...")
+        raise ValueError("paths.rscan_root is required. Place 3RScan data in ./data/3rscan or override paths.rscan_root=...")
 
     # load scene-graphs
     raw3d = torch.load(cfg.paths.graphs_3dssg, map_location="cpu")
@@ -139,7 +149,7 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
     if cfg.eval.model_name is not None:
         ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
         ckpt = torch.load(ckpt_path, map_location=device)
-        model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+        model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         model.load_state_dict(ckpt)
         model.eval()
 
@@ -148,7 +158,10 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
     # for each caption, find best, worst, and gt scenes, then show them
     for qg in dataset:
         scores = {
-          sid: compute_match_score(model, qg, sg, device)
+          sid: compute_match_score(model, qg, sg, device,
+                                   cfg.inference.score_blend_weight,
+                                   cfg.graph.dbscan_eps,
+                                   cfg.graph.dbscan_min_samples)
           for sid, sg in database_3dssg.items()
         }
         best_sid  = max(scores,  key=scores.get)
@@ -161,9 +174,11 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
         print(f" -> Worst match: {worst_sid} (score={scores[worst_sid]:.4f})")
         print(f" -> GroundTruth: {gt_sid}  (score={scores[gt_sid]:.4f})")
 
-        visualize_match(scan_root, qg, database_3dssg[best_sid])
-        visualize_match(scan_root, qg, database_3dssg[worst_sid])
-        visualize_match(scan_root, qg, database_3dssg[gt_sid])
+        db_eps = cfg.graph.dbscan_eps
+        db_ms = cfg.graph.dbscan_min_samples
+        visualize_match(scan_root, qg, database_3dssg[best_sid], db_eps, db_ms)
+        visualize_match(scan_root, qg, database_3dssg[worst_sid], db_eps, db_ms)
+        visualize_match(scan_root, qg, database_3dssg[gt_sid], db_eps, db_ms)
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="config")

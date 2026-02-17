@@ -1,3 +1,10 @@
+# =============================================================================
+# Root Hydra configuration — composes all config groups.
+#
+# Override any value via CLI:
+#   python -m whereami.models.train mode=disabled seed=123 device=cuda
+# =============================================================================
+
 defaults:
   - paths: default
   - model: default
@@ -8,7 +15,21 @@ defaults:
   - localization: default
   - _self_
 
-mode: online    # wandb mode: online | offline | disabled
+# Weights & Biases logging mode.
+#   online   — log to W&B cloud
+#   offline  — log locally, sync later with `wandb sync`
+#   disabled — skip W&B entirely
+mode: online
+
+# Global random seed for reproducibility (used by random.seed / torch / numpy).
 seed: 42
-device: auto    # auto | cuda | cpu
-scan_id: null   # target scan ID for visualization scripts
+
+# Torch device.
+#   auto — picks cuda if available, else cpu
+#   cuda — force GPU
+#   cpu  — force CPU
+device: auto
+
+# Target 3RScan scene ID for visualization scripts (e.g. "0a4b8ef6-a83a-21f2-8571-7c69270d5137").
+# Required by visualization_minimal and visualization_graph_object; ignored elsewhere.
+scan_id: null

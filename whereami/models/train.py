@@ -70,7 +70,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
                     if (cfg.train.subgraph_ablation):
                         query_subgraph, db_subgraph = query, db
                     else:
-                        query_subgraph, db_subgraph = get_matching_subgraph(query, db)
+                        query_subgraph, db_subgraph = get_matching_subgraph(query, db, cfg.graph.dbscan_eps, cfg.graph.dbscan_min_samples)
                         if db_subgraph is None or len(db_subgraph.nodes) <= 1: db_subgraph = db
                         if query_subgraph is None or len(query_subgraph.nodes) <= 1: query_subgraph = query
 
@@ -104,7 +104,10 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
             loss3 = cross_entropy(loss3, loss3_t, reduction='mean', dim=1)
             if (cfg.train.loss_ablation_m): loss = loss1
             elif (cfg.train.loss_ablation_c): loss = loss3
-            else: loss = (loss1 + loss3) / 2.0
+            else:
+                w_c = cfg.train.loss_weight_cosine
+                w_m = cfg.train.loss_weight_matching
+                loss = (w_c * loss1 + w_m * loss3) / (w_c + w_m)
 
             optimizer.zero_grad()
             loss.backward()
@@ -166,7 +169,7 @@ def eval_loss(model, database_3dssg, dataset, fold, cfg):
                         if (cfg.train.subgraph_ablation):
                             query_subgraph, db_subgraph = query, db
                         else:
-                            query_subgraph, db_subgraph = get_matching_subgraph(query, db)
+                            query_subgraph, db_subgraph = get_matching_subgraph(query, db, cfg.graph.dbscan_eps, cfg.graph.dbscan_min_samples)
                             if db_subgraph is None or len(db_subgraph.nodes) <= 1: db_subgraph = db
                             if query_subgraph is None or len(query_subgraph.nodes) <= 1: query_subgraph = query
 
@@ -199,7 +202,10 @@ def eval_loss(model, database_3dssg, dataset, fold, cfg):
                 loss3 = cross_entropy(loss3, loss3_t, reduction='mean', dim=1)
                 if (cfg.train.loss_ablation_m or cfg.eval.eval_only_c): loss = loss1
                 elif (cfg.train.loss_ablation_c): loss = loss3
-                else: loss = (loss1 + loss3) / 2.0
+                else:
+                    w_c = cfg.train.loss_weight_cosine
+                    w_m = cfg.train.loss_weight_matching
+                    loss = (w_c * loss1 + w_m * loss3) / (w_c + w_m)
 
                 loss1_across_batches.append(loss1.item())
                 loss3_across_batches.append(loss3.item())
@@ -286,7 +292,7 @@ def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_
                 if (cfg.train.subgraph_ablation):
                     query_subgraph, db_subgraph = query, db
                 else:
-                    query_subgraph, db_subgraph = get_matching_subgraph(query, db)
+                    query_subgraph, db_subgraph = get_matching_subgraph(query, db, cfg.graph.dbscan_eps, cfg.graph.dbscan_min_samples)
                     if db_subgraph is None or len(db_subgraph.nodes) <= 1 or len(db_subgraph.edge_idx[0]) < 1: db_subgraph = db
                     if query_subgraph is None or len(query_subgraph.nodes) <= 1 or len(query_subgraph.edge_idx[0]) < 1: query_subgraph = query
                 x_node_ft, x_edge_idx, x_edge_ft = query_subgraph.to_pyg()
@@ -380,10 +386,10 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
     ckpt_dir = Path(cfg.paths.checkpoint_dir)
     if entire_training_set:
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
@@ -412,10 +418,10 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
         print(f'length of validation set in fold {fold}: {len(val_dataset)}')
 
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
@@ -585,10 +591,10 @@ def run_training(cfg: DictConfig) -> None:
 
     if cfg.train.training_with_cross_val:
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
         model = train_with_cross_val(database_3dssg=_3dssg_graphs,
                                         dataset=scanscribe_graphs,

@@ -100,7 +100,7 @@ def run_eval(cfg: DictConfig) -> None:
 
     model_name = cfg.eval.model_name
     model_state_dict = torch.load(ckpt_dir / f'{model_name}.pt')
-    model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+    model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
     model.load_state_dict(model_state_dict)
 
     if cfg.eval.eval_entire_dataset:

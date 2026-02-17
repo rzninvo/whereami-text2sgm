@@ -48,7 +48,7 @@ def run_visualize_loc_prob(cfg: DictConfig) -> None:
         cfg: Merged Hydra configuration.
     """
     if cfg.paths.rscan_root is None:
-        raise ValueError("paths.rscan_root is required. Set RSCAN_ROOT env var or override paths.rscan_root=...")
+        raise ValueError("paths.rscan_root is required. Place 3RScan data in ./data/3rscan or override paths.rscan_root=...")
 
     rscan_root = Path(cfg.paths.rscan_root)
     loc = cfg.localization

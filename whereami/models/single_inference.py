@@ -4,11 +4,13 @@ Usage::
 
     python -m whereami.models.single_inference \
         inference.query="There is a wooden chair next to a table." \
-        inference.api_key_file=/path/to/openai_key.txt \
         inference.top_k=5
+
+Requires OPENAI_API_KEY in .env or environment.
 """
 
 import json
+import os
 
 import numpy as np
 import openai
@@ -67,7 +69,7 @@ def parse_text_to_json(query_text: str, debug: bool = False) -> dict:
     Raises:
         ValueError: If the LLM returns invalid JSON that cannot be parsed.
     """
-    client = openai.OpenAI(api_key=openai.api_key)
+    client = openai.OpenAI()
     prompt = f"""
     You are a parser that converts natural language scene descriptions into a JSON graph.
     Extract:
@@ -179,17 +181,8 @@ def run_single_inference(cfg: DictConfig) -> None:
 
     if cfg.inference.query is None:
         raise ValueError("inference.query is required. Set via CLI: inference.query='...'")
-    if cfg.inference.api_key_file is None:
-        raise ValueError("inference.api_key_file is required. Set via CLI: inference.api_key_file=/path/to/key")
-
-    # Load OpenAI API key
-    with open(cfg.inference.api_key_file, "r") as f:
-        line = f.read().strip()
-        if line.startswith("OPENAI_API_KEY="):
-            key = line.split("=", 1)[1]
-        else:
-            key = line
-        openai.api_key = key
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY not set. Add it to your .env file.")
 
     # Load 3DSSG database
     g3d_raw = torch.load(cfg.paths.graphs_3dssg,
@@ -208,7 +201,7 @@ def run_single_inference(cfg: DictConfig) -> None:
         raise ValueError("eval.model_name is required. Set via CLI: eval.model_name=my_model")
     ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
 
-    model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+    model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
 
@@ -228,7 +221,10 @@ def run_single_inference(cfg: DictConfig) -> None:
         iterator = tqdm(iterator, total=len(database_3dssg), desc="Scoring scenes")
 
     for sid, sg in iterator:
-        scores[sid] = compute_match_score(model, query_graph, sg, device)
+        scores[sid] = compute_match_score(model, query_graph, sg, device,
+                                              cfg.inference.score_blend_weight,
+                                              cfg.graph.dbscan_eps,
+                                              cfg.graph.dbscan_min_samples)
 
     best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:cfg.inference.top_k]
 

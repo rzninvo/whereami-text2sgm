@@ -25,7 +25,7 @@ root: ${oc.env:RSCAN_ROOT}
 graphs: ${oc.env:WHEREAMI_DATA_ROOT}/processed_data
 query_root: null
 scene_ids: null
-seed: 0
+seed: 42
 max_scenes: null
 visualize_scene: null
 

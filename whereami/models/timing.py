@@ -29,20 +29,24 @@ class Timer:
         self.text2graph_matching_time = []
         self.text2graph_matching_iter = []
 
-    def save(self, path, args):
+    def save(self, path, cfg):
         """Writes aggregated timing statistics to a text file.
 
         Args:
             path: Destination file path.
-            args: Parsed arguments namespace (uses ``eval_iters``,
-                ``eval_iter_count``, ``out_of``).
+            cfg: Hydra DictConfig (uses ``cfg.eval.eval_iters``,
+                ``cfg.eval.eval_iter_count``, ``cfg.eval.out_of``).
         """
+        eval_iters = cfg.eval.eval_iters
+        eval_iter_count = cfg.eval.eval_iter_count
+        out_of = cfg.eval.out_of
+
         with open(path, 'w') as f:
             assert len(self.text2graph_text_embedding_matching_score_time) == len(self.text2graph_text_embedding_matching_score_iter), \
                 "Mismatch between score times and score iteration counts"
             assert len(self.text2graph_matching_time) == len(self.text2graph_matching_iter), \
                 "Mismatch between matching times and matching iteration counts"
-            assert sum(self.text2graph_matching_iter) == args.eval_iters * args.eval_iter_count, \
+            assert sum(self.text2graph_matching_iter) == eval_iters * eval_iter_count, \
                 "Total matching iterations does not match eval_iters * eval_iter_count"
 
             f.write(f'start_time: {self.start_time}\n')
@@ -62,8 +66,8 @@ class Timer:
             f.write(f'Std of embedding time: {np.std(self.text2graph_text_embedding_time)}\n')
             f.write(f'Matching score time, avg time for 1 matching score: {time_for_matching_score}\n')
             f.write(f'Std of matching score time: {np.std(self.text2graph_text_embedding_matching_score_time)}\n')
-            f.write(f'Matching time, avg time for 1 matching, or sorting within {args.out_of}: {time_for_matching}\n')
+            f.write(f'Matching time, avg time for 1 matching, or sorting within {out_of}: {time_for_matching}\n')
             f.write(f'Std of matching time: {np.std(self.text2graph_matching_time)}\n')
 
-            calc_time = time_for_embedding + time_for_matching_score * args.out_of + time_for_matching
-            f.write(f'Total run time for 1 text matching against {args.out_of} database scenes: {calc_time}\n')
+            calc_time = time_for_embedding + time_for_matching_score * out_of + time_for_matching
+            f.write(f'Total run time for 1 text matching against {out_of} database scenes: {calc_time}\n')

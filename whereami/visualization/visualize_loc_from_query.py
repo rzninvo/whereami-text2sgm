@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Localise a natural-language query inside a specific 3RScan scene.
 
 Bridges:
@@ -8,21 +7,20 @@ Bridges:
 Usage::
 
     python -m whereami.visualization.visualize_loc_from_query \\
-        --root /path/to/3RScan/data/3RScan \\
-        --graphs /path/to/processed_data \\
-        --scan_id 3RScan1234 \\
-        --query "I can see a sofa facing a TV and a coffee table between them." \\
-        --top_k 8 --grid_step 0.25 --show_heatmap --show_arrows --show_3d \\
-        --h_fov_deg 100 --v_fov_deg 60 \\
-        --api_key_file /path/to/openai_api_key.txt
+        scan_id=3RScan1234 \\
+        inference.query="I can see a sofa facing a TV and a coffee table between them." \\
+        inference.api_key_file=/path/to/openai_api_key.txt \\
+        localization.top_k=8 localization.show_heatmap=true localization.show_3d=true
 """
 from __future__ import annotations
 
-import argparse
 import os
 from pathlib import Path
 
 import torch
+
+import hydra
+from omegaconf import DictConfig
 
 from whereami.data_processing.scene_graph import SceneGraph
 from whereami.localization.grid import load_scene
@@ -31,47 +29,17 @@ from whereami.localization.pipeline import run_loc_pipeline
 from whereami.models.single_inference import text_to_scenegraph
 
 
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="Localise a custom natural-language query inside a specific 3RScan."
-    )
-    p.add_argument("--root", required=True,
-                   help="Parent folder of 3RScan/<scan_id>/")
-    p.add_argument("--graphs", required=True, type=Path,
-                   help="processed_data folder containing 3dssg/*.pt")
-    p.add_argument("--scan_id", required=True, type=str,
-                   help="Target 3RScan scene ID (e.g., '3RScan1234')")
-    p.add_argument("--query", required=True, type=str,
-                   help="Natural language description to localise")
+def ensure_openai_key(api_key_file: str | None):
+    """Set openai.api_key from file or environment variable.
 
-    p.add_argument("--top_k", type=int, default=25,
-                   help="How many object matches to keep")
-    p.add_argument("--grid_step", type=float, default=0.25,
-                   help="XY grid spacing (m)")
+    Args:
+        api_key_file: Path to file containing ``OPENAI_API_KEY=sk-...`` or
+            just the key. If None, falls back to the ``OPENAI_API_KEY``
+            environment variable.
 
-    p.add_argument("--show_heatmap", action="store_true",
-                   help="Show 2-D Matplotlib heatmap")
-    p.add_argument("--show_3d", action="store_true",
-                   help="Open Open3D viewer with mesh + probability spheres")
-    p.add_argument("--show_arrows", action="store_true",
-                   help="Show FOV-weighted arrow (quiver) plot")
-    p.add_argument("--h_fov_deg", type=float, default=100.0,
-                   help="Horizontal FOV in degrees")
-    p.add_argument("--v_fov_deg", type=float, default=60.0,
-                   help="Vertical FOV in degrees")
-    p.add_argument("--arrow_stride", type=int, default=2,
-                   help="Plot every Nth grid camera")
-    p.add_argument("--arrow_len", type=float, default=0.0,
-                   help="Max arrow length in metres (0 = 0.9*grid_step)")
-
-    p.add_argument("--api_key_file", type=Path,
-                   help="File containing OPENAI_API_KEY=sk-... or just the key")
-
-    return p.parse_args()
-
-
-def ensure_openai_key(api_key_file: Path | None):
-    """Set openai.api_key from file or environment variable."""
+    Raises:
+        RuntimeError: If no API key is found.
+    """
     import openai
     if api_key_file is not None:
         text = Path(api_key_file).read_text().strip()
@@ -80,13 +48,30 @@ def ensure_openai_key(api_key_file: Path | None):
     else:
         if not (getattr(openai, "api_key", None) or os.getenv("OPENAI_API_KEY")):
             raise RuntimeError(
-                "OpenAI API key not found. Pass --api_key_file or set OPENAI_API_KEY."
+                "OpenAI API key not found. Set inference.api_key_file or OPENAI_API_KEY env var."
             )
 
 
-def load_scene_graph_for_scan(graphs_dir: Path, scan_id: str) -> SceneGraph:
-    """Load 3DSSG database and return SceneGraph for the requested scan_id."""
-    g3d_path = graphs_dir / "3dssg" / "3dssg_graphs_processed_edgelists_relationembed.pt"
+def load_scene_graph_for_scan(graphs_3dssg_path: str, scan_id: str,
+                               max_dist: float, embedding_type: str,
+                               use_attributes: bool) -> SceneGraph:
+    """Load 3DSSG database and return SceneGraph for the requested scan_id.
+
+    Args:
+        graphs_3dssg_path: Path to the 3DSSG graphs .pt file.
+        scan_id: Target scan ID.
+        max_dist: Maximum distance for graph construction.
+        embedding_type: Embedding backend name.
+        use_attributes: Whether to use attribute embeddings.
+
+    Returns:
+        SceneGraph for the requested scan.
+
+    Raises:
+        FileNotFoundError: If the graphs file does not exist.
+        KeyError: If the scan_id is not found.
+    """
+    g3d_path = Path(graphs_3dssg_path)
     if not g3d_path.exists():
         raise FileNotFoundError(g3d_path)
 
@@ -102,51 +87,76 @@ def load_scene_graph_for_scan(graphs_dir: Path, scan_id: str) -> SceneGraph:
     sg = SceneGraph(scan_id,
                     graph_type="3dssg",
                     graph=g,
-                    max_dist=1.0,
-                    embedding_type="word2vec",
-                    use_attributes=True)
+                    max_dist=max_dist,
+                    embedding_type=embedding_type,
+                    use_attributes=use_attributes)
     return sg
 
 
-def main():
-    args = parse_args()
-    ensure_openai_key(args.api_key_file)
+def run_visualize_loc_from_query(cfg: DictConfig) -> None:
+    """Runs localization visualization from a natural-language query.
+
+    Args:
+        cfg: Merged Hydra configuration.
+    """
+    if cfg.scan_id is None:
+        raise ValueError("scan_id is required. Set via CLI: scan_id=3RScan1234")
+    if cfg.inference.query is None:
+        raise ValueError("inference.query is required. Set via CLI: inference.query='...'")
+    if cfg.paths.rscan_root is None:
+        raise ValueError("paths.rscan_root is required. Set RSCAN_ROOT env var or override paths.rscan_root=...")
+
+    ensure_openai_key(cfg.inference.api_key_file)
+
+    loc = cfg.localization
 
     # 1) Build a query SceneGraph from free text
-    qg = text_to_scenegraph(args.query,
-                            embedding_type="word2vec",
+    qg = text_to_scenegraph(cfg.inference.query,
+                            embedding_type=cfg.graph.embedding_type,
+                            use_attributes=cfg.graph.use_attributes,
                             scene_id="query_0001",
-                            debug=False)
+                            debug=cfg.inference.debug)
 
     # 2) Load the target scene's 3DSSG
-    sg = load_scene_graph_for_scan(args.graphs, args.scan_id)
+    sg = load_scene_graph_for_scan(cfg.paths.graphs_3dssg,
+                                    cfg.scan_id,
+                                    max_dist=cfg.graph.max_dist,
+                                    embedding_type=cfg.graph.embedding_type,
+                                    use_attributes=cfg.graph.use_attributes)
 
     # 3) Top-K object matches
-    obj_ids = topk_matched_objects(qg, sg, k=args.top_k)
+    obj_ids = topk_matched_objects(qg, sg, k=loc.top_k)
     if not obj_ids:
         print("No cosine matches found between query and scene.")
         return
 
     # 4) Load mesh and run localization pipeline
-    mesh, tri2obj, obj2faces = load_scene(Path(args.root) / sg.scene_id)
+    rscan_root = Path(cfg.paths.rscan_root)
+    mesh, tri2obj, obj2faces = load_scene(rscan_root / sg.scene_id)
     print(f"[{sg.scene_id}] {len(obj_ids)} matched objs")
 
     run_loc_pipeline(
-        scan_dir=Path(args.root) / sg.scene_id,
+        scan_dir=rscan_root / sg.scene_id,
         obj_ids=obj_ids,
         obj2faces=obj2faces,
         mesh=mesh,
         tri2obj=tri2obj,
-        grid_step=args.grid_step,
-        show_heatmap=args.show_heatmap,
-        show_arrows=args.show_arrows,
-        show_3d=args.show_3d,
-        h_fov_deg=args.h_fov_deg,
-        v_fov_deg=args.v_fov_deg,
-        arrow_stride=args.arrow_stride,
-        arrow_len=args.arrow_len,
+        grid_step=loc.grid_step,
+        show_heatmap=loc.show_heatmap,
+        show_arrows=loc.show_arrows,
+        show_3d=loc.show_3d,
+        h_fov_deg=loc.h_fov_deg,
+        v_fov_deg=loc.v_fov_deg,
+        arrow_stride=loc.arrow_stride,
+        arrow_len=loc.arrow_len,
         title_prefix=f"{sg.scene_id} – ",
     )
+
+
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Hydra CLI entry point for query-based localization visualization."""
+    run_visualize_loc_from_query(cfg)
 
 
 if __name__ == "__main__":

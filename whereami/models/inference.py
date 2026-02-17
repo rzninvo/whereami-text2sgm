@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Batch text-to-scene retrieval: ScanScribe caption graph to top-k matching 3D-SSG scenes.
 
 Scoring: 0.5 * matching-probability + 0.5 * cosine-similarity (both in [0,1]).
@@ -6,7 +5,6 @@ Scoring: 0.5 * matching-probability + 0.5 * cosine-similarity (both in [0,1]).
 
 from __future__ import annotations
 
-import argparse
 import json
 import time
 
@@ -14,6 +12,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pathlib import Path
+
+import hydra
+from omegaconf import DictConfig
 
 from whereami.data_processing.scene_graph import SceneGraph
 from whereami.analysis.helper import get_matching_subgraph
@@ -67,85 +68,85 @@ def compute_match_score(model: BigGNN | None,
     return 0.5 * m_p.item() + 0.5 * cos
 
 
-def parse_args():
-    """Parses command-line arguments for batch inference.
+def run_inference(cfg: DictConfig) -> None:
+    """Runs batch text-to-scene retrieval over all ScanScribe captions.
 
-    Returns:
-        Parsed argument namespace with graphs path, checkpoint, top_k, device,
-        and optional JSONL output path.
+    Args:
+        cfg: Merged Hydra configuration.
     """
-    p = argparse.ArgumentParser()
-    p.add_argument("--graphs", required=True, type=Path,
-                   help="Folder that contains the processed_data/{3dssg,scanscribe}/ sub-folders")
-    p.add_argument("--ckpt", required=True, type=Path,
-                   help="Trained BigGNN checkpoint (*.pt)")
-    p.add_argument("--top_k", type=int, default=5)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--jsonl_out", type=Path,
-                   help="Write one ranked-list per query to this JSONL file")
-    return p.parse_args()
+    device = cfg.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-
-def main():
-    """Runs batch text-to-scene retrieval over all ScanScribe captions."""
-    args = parse_args()
     t0 = time.perf_counter()
 
     # Load graphs
-    g3d_raw = torch.load(args.graphs / "3dssg" / "3dssg_graphs_processed_edgelists_relationembed.pt",
-                         map_location="cpu")
-    scans_raw = torch.load(args.graphs / "scanscribe" / "scanscribe_text_graphs_from_image_desc_node_edge_features.pt",
-                           map_location="cpu")
+    g3d_raw = torch.load(cfg.paths.graphs_3dssg, map_location="cpu")
+    scans_raw = torch.load(cfg.paths.scanscribe_text, map_location="cpu")
 
     database_3dssg = {
         sid: SceneGraph(sid, graph_type="3dssg", graph=g,
-                        max_dist=1.0, embedding_type="word2vec",
-                        use_attributes=True)
+                        max_dist=cfg.graph.max_dist,
+                        embedding_type=cfg.graph.embedding_type,
+                        use_attributes=cfg.graph.use_attributes)
         for sid, g in g3d_raw.items()
     }
     queries = [
         SceneGraph(k.split("_")[0], txt_id=None,
                    graph=g, graph_type="scanscribe",
-                   embedding_type="word2vec", use_attributes=True)
+                   embedding_type=cfg.graph.embedding_type,
+                   use_attributes=cfg.graph.use_attributes)
         for k, g in scans_raw.items()
     ]
     print(f"Loaded {len(queries)} ScanScribe captions, "
           f"{len(database_3dssg)} 3D-SSG scenes.")
 
     # Load model
-    device = args.device
-    model = BigGNN(N=1, heads=2).to(device)
-    model.load_state_dict(torch.load(args.ckpt, map_location=device))
+    ckpt_dir = Path(cfg.paths.checkpoint_dir)
+    if cfg.eval.model_name is None:
+        raise ValueError("eval.model_name is required. Set via CLI: eval.model_name=my_model")
+    ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
+
+    model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+    model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model.eval()
 
     # For each caption, rank all scenes
-    jsonl = None
-    if args.jsonl_out:
-        jsonl = open(args.jsonl_out, "w")
+    top_k = cfg.inference.top_k
+    jsonl_out = cfg.inference.jsonl_out
+    jsonl_fh = open(jsonl_out, "w") if jsonl_out else None
+    try:
+        for qi, qg in enumerate(queries, 1):
+            scores = {
+                sid: compute_match_score(model, qg, sg, device)
+                for sid, sg in database_3dssg.items()
+            }
+            best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
 
-    for qi, qg in enumerate(queries, 1):
-        scores = {
-            sid: compute_match_score(model, qg, sg, device)
-            for sid, sg in database_3dssg.items()
-        }
-        best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:args.top_k]
+            print(f"\nQuery {qi:>4}/{len(queries)}  (scene_id={qg.scene_id})")
+            for rank, (sid, sc) in enumerate(best, 1):
+                gt_tag = "  *GT*" if sid == qg.scene_id else ""
+                print(f"  {rank:>2}. {sid:<18}  score={sc:5.3f}{gt_tag}")
 
-        print(f"\nQuery {qi:>4}/{len(queries)}  (scene_id={qg.scene_id})")
-        for rank, (sid, sc) in enumerate(best, 1):
-            gt_tag = "  *GT*" if sid == qg.scene_id else ""
-            print(f"  {rank:>2}. {sid:<18}  score={sc:5.3f}{gt_tag}")
+            if jsonl_fh:
+                jsonl_fh.write(json.dumps({
+                    "query_scene_id": qg.scene_id,
+                    "top_k": best
+                }) + "\n")
+    finally:
+        if jsonl_fh:
+            jsonl_fh.close()
 
-        if jsonl:
-            jsonl.write(json.dumps({
-                "query_scene_id": qg.scene_id,
-                "top_k": best
-            }) + "\n")
-
-    if jsonl:
-        jsonl.close()
-        print(f"\nWrote ranked lists to {args.jsonl_out}")
+    if jsonl_out:
+        print(f"\nWrote ranked lists to {jsonl_out}")
 
     print(f"\nFinished in {(time.perf_counter()-t0):.1f}s.")
+
+
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Hydra CLI entry point for batch inference."""
+    run_inference(cfg)
 
 
 if __name__ == "__main__":

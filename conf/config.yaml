@@ -1,8 +1,14 @@
 defaults:
   - paths: default
-  - embedding: default
+  - model: default
+  - graph: default
+  - train: default
+  - eval: default
+  - inference: default
+  - localization: default
   - _self_
 
 mode: online    # wandb mode: online | offline | disabled
 seed: 42
 device: auto    # auto | cuda | cpu
+scan_id: null   # target scan ID for visualization scripts

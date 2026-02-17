@@ -8,16 +8,7 @@ import copy
 
 from whereami.data_processing.scene_graph import SceneGraph
 
-# Lazy-loaded spaCy model
-_nlp = None
-
-def _get_nlp():
-    """Returns the lazily-loaded spaCy ``en_core_web_lg`` model."""
-    global _nlp
-    if _nlp is None:
-        import spacy
-        _nlp = spacy.load("en_core_web_lg")
-    return _nlp
+from whereami.utils.utils import _get_nlp
 
 
 def np_cosine_sim(a, b):

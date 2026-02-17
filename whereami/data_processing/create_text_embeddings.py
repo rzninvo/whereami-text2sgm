@@ -10,18 +10,7 @@ import os
 import tiktoken
 import tqdm
 
-from whereami.utils.utils import load_text_dataset
-
-_nlp = None
-
-
-def _get_nlp():
-    """Returns the lazily-loaded spaCy ``en_core_web_lg`` model."""
-    global _nlp
-    if _nlp is None:
-        import spacy
-        _nlp = spacy.load("en_core_web_lg")
-    return _nlp
+from whereami.utils.utils import load_text_dataset, _get_nlp
 
 
 _clip_tokenizer = None

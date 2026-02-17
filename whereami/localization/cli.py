@@ -24,7 +24,7 @@ def main(cfg: DictConfig) -> None:
     Args:
         cfg: Merged Hydra configuration.
     """
-    run_evaluation(cfg.localization)
+    run_evaluation(cfg.localization, graph_cfg=cfg.graph)
 
 
 if __name__ == "__main__":

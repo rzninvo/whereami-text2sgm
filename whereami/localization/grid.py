@@ -50,10 +50,8 @@ def load_scene(scan_dir: Path):
     vc   = (np.asarray(mesh.vertex_colors) * 255 + 0.5).astype(np.uint32)
     vhex = (vc[:, 0] << 16) | (vc[:, 1] << 8) | vc[:, 2]
 
-    meta = {
-        s["scan"]: s
-        for s in json.load(open(scan_dir.parent / "objects.json"))["scans"]
-    }[scan_dir.name]
+    with open(scan_dir.parent / "objects.json") as f:
+        meta = {s["scan"]: s for s in json.load(f)["scans"]}[scan_dir.name]
     color2oid = {int(o["ply_color"].lstrip("#"), 16): int(o["id"])
                  for o in meta["objects"]}
 

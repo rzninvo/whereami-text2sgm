@@ -1,17 +1,13 @@
-#!/usr/bin/env python3
 """Open-set single-query inference: natural language to top-k 3DSSG scene matches.
 
 Usage::
 
     python -m whereami.models.single_inference \
-        --graphs $WHEREAMI_DATA_ROOT/processed_data \
-        --ckpt $WHEREAMI_DATA_ROOT/model_checkpoints/graph2graph/best_model.pt \
-        --query "There is a wooden chair next to a table." \
-        --api_key_file /path/to/openai_key.txt \
-        --top_k 5
+        inference.query="There is a wooden chair next to a table." \
+        inference.api_key_file=/path/to/openai_key.txt \
+        inference.top_k=5
 """
 
-import argparse
 import json
 
 import numpy as np
@@ -20,6 +16,9 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from pathlib import Path
+
+import hydra
+from omegaconf import DictConfig
 
 from whereami.data_processing.scene_graph import SceneGraph
 from whereami.models.model_graph2graph import BigGNN
@@ -133,6 +132,7 @@ def parse_text_to_json(query_text: str, debug: bool = False) -> dict:
 
 def text_to_scenegraph(query_text: str,
                        embedding_type="word2vec",
+                       use_attributes=True,
                        scene_id="query_0001", debug: bool = False):
     """Converts a natural language query into a SceneGraph.
 
@@ -142,6 +142,7 @@ def text_to_scenegraph(query_text: str,
     Args:
         query_text: Natural language scene description.
         embedding_type: Embedding backend (``'word2vec'``, ``'clip'``, or ``'ada'``).
+        use_attributes: Whether to include attribute embeddings.
         scene_id: Scene ID to assign to the resulting graph.
         debug: If True, enables debug output during parsing.
 
@@ -163,40 +164,26 @@ def text_to_scenegraph(query_text: str,
                       graph_type="scanscribe",
                       graph=parsed,
                       embedding_type=embedding_type,
-                      use_attributes=True)
+                      use_attributes=use_attributes)
 
 
-def parse_args():
-    """Parses command-line arguments for single-query inference.
+def run_single_inference(cfg: DictConfig) -> None:
+    """Runs single-query text-to-scene retrieval against the 3DSSG database.
 
-    Returns:
-        Parsed argument namespace with graphs path, checkpoint, query text,
-        embedding type, top_k, device, API key file, and debug flag.
+    Args:
+        cfg: Merged Hydra configuration.
     """
-    p = argparse.ArgumentParser()
-    p.add_argument("--graphs", required=True, type=Path,
-                   help="Folder containing processed_data/{3dssg}/ sub-folder")
-    p.add_argument("--ckpt", required=True, type=Path,
-                   help="Trained BigGNN checkpoint (*.pt)")
-    p.add_argument("--query", required=True, type=str,
-                   help="Natural language query description")
-    p.add_argument("--embedding_type", default="clip",
-                   choices=["word2vec", "clip", "ada"])
-    p.add_argument("--top_k", type=int, default=5)
-    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--api_key_file", type=Path,
-                   help="Path to file with line 'OPENAI_API_KEY=sk-...'", default=None)
-    p.add_argument("--debug", action="store_true",
-                   help="Enable debug mode (print LLM output, parsed graph, tqdm progress)")
-    return p.parse_args()
+    device = cfg.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-
-def main():
-    """Runs single-query text-to-scene retrieval against the 3DSSG database."""
-    args = parse_args()
+    if cfg.inference.query is None:
+        raise ValueError("inference.query is required. Set via CLI: inference.query='...'")
+    if cfg.inference.api_key_file is None:
+        raise ValueError("inference.api_key_file is required. Set via CLI: inference.api_key_file=/path/to/key")
 
     # Load OpenAI API key
-    with open(args.api_key_file, "r") as f:
+    with open(cfg.inference.api_key_file, "r") as f:
         line = f.read().strip()
         if line.startswith("OPENAI_API_KEY="):
             key = line.split("=", 1)[1]
@@ -205,44 +192,59 @@ def main():
         openai.api_key = key
 
     # Load 3DSSG database
-    g3d_raw = torch.load(args.graphs / "3dssg" / "3dssg_graphs_processed_edgelists_relationembed.pt",
+    g3d_raw = torch.load(cfg.paths.graphs_3dssg,
                          map_location="cpu", weights_only=False)
     database_3dssg = {
         sid: SceneGraph(sid, graph_type="3dssg", graph=g,
-                        max_dist=1.0, embedding_type=args.embedding_type,
-                        use_attributes=True)
+                        max_dist=cfg.graph.max_dist,
+                        embedding_type=cfg.graph.embedding_type,
+                        use_attributes=cfg.graph.use_attributes)
         for sid, g in g3d_raw.items()
     }
 
     # Load model
-    model = BigGNN(N=1, heads=2).to(args.device)
-    model.load_state_dict(torch.load(args.ckpt, map_location=args.device, weights_only=False))
+    ckpt_dir = Path(cfg.paths.checkpoint_dir)
+    if cfg.eval.model_name is None:
+        raise ValueError("eval.model_name is required. Set via CLI: eval.model_name=my_model")
+    ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
+
+    model = BigGNN(cfg.model.N, cfg.model.heads).to(device)
+    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
 
     # Convert query text to SceneGraph
-    query_graph = text_to_scenegraph(args.query,
-                                     embedding_type=args.embedding_type,
-                                     scene_id="query_0001", debug=args.debug)
+    query_text = cfg.inference.query
+    debug = cfg.inference.debug
+    query_graph = text_to_scenegraph(query_text,
+                                     embedding_type=cfg.graph.embedding_type,
+                                     use_attributes=cfg.graph.use_attributes,
+                                     scene_id="query_0001", debug=debug)
 
     # Score against database
     scores = {}
     iterator = database_3dssg.items()
 
-    if args.debug:
+    if debug:
         iterator = tqdm(iterator, total=len(database_3dssg), desc="Scoring scenes")
 
     for sid, sg in iterator:
-        scores[sid] = compute_match_score(model, query_graph, sg, args.device)
+        scores[sid] = compute_match_score(model, query_graph, sg, device)
 
-    best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:args.top_k]
+    best = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:cfg.inference.top_k]
 
-    print(f"\nQuery: {args.query}")
+    print(f"\nQuery: {query_text}")
     print("Top matches:")
     for rank, (sid, sc) in enumerate(best, 1):
         print(f"  {rank:>2}. {sid:<18}  score={sc:5.3f}")
 
-    if args.debug:
+    if debug:
         print("\n[DEBUG] Finished scoring all scenes.")
+
+
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Hydra CLI entry point for single-query inference."""
+    run_single_inference(cfg)
 
 
 if __name__ == "__main__":

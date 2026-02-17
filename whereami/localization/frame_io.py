@@ -142,7 +142,8 @@ def select_frame(frames: List[FrameSelection],
 # ---------------------------------------------------------------------------
 
 def frame_to_scenegraph(frame: dict,
-                        embedding_type: str = "word2vec") -> Tuple[SceneGraph, Dict[int, dict]]:
+                        embedding_type: str = "word2vec",
+                        use_attributes: bool = True) -> Tuple[SceneGraph, Dict[int, dict]]:
     """Build a caption SceneGraph from a frame's visible objects and spatial relations.
 
     Each visible object becomes a graph node (with word2vec label
@@ -155,6 +156,8 @@ def frame_to_scenegraph(frame: dict,
             ``"visible_objects"`` and optionally ``"spatial_relations"``.
         embedding_type: Embedding backend.  Currently only ``"word2vec"``
             is supported.
+        use_attributes: Whether to include attribute embeddings in the
+            constructed SceneGraph.
 
     Returns:
         A 2-tuple ``(sg, meta)`` where
@@ -222,7 +225,7 @@ def frame_to_scenegraph(frame: dict,
                     graph_type="scanscribe",
                     graph=graph_dict,
                     embedding_type=embedding_type,
-                    use_attributes=True)
+                    use_attributes=use_attributes)
     return sg, meta
 
 
@@ -254,12 +257,18 @@ def camera_center_from_pose(pose: Iterable[Iterable[float]]) -> np.ndarray:
 #  Scene graph loading
 # ---------------------------------------------------------------------------
 
-def load_scene_graphs(graphs_dir: Path) -> Dict[str, SceneGraph]:
+def load_scene_graphs(graphs_dir: Path,
+                      max_dist: float = 1.0,
+                      embedding_type: str = "word2vec",
+                      use_attributes: bool = True) -> Dict[str, SceneGraph]:
     """Load pre-processed 3D-SSG graphs into a dict keyed by scene ID.
 
     Args:
         graphs_dir: Root of the processed-data directory, expected to
             contain ``3dssg/3dssg_graphs_processed_edgelists_relationembed.pt``.
+        max_dist: Maximum distance for graph construction.
+        embedding_type: Embedding backend name.
+        use_attributes: Whether to include attribute embeddings.
 
     Returns:
         A dict mapping scene ID strings to :class:`SceneGraph` instances.
@@ -276,9 +285,9 @@ def load_scene_graphs(graphs_dir: Path) -> Dict[str, SceneGraph]:
         scenes[sid] = SceneGraph(sid,
                                  graph_type="3dssg",
                                  graph=graph,
-                                 max_dist=1.0,
-                                 embedding_type="word2vec",
-                                 use_attributes=True)
+                                 max_dist=max_dist,
+                                 embedding_type=embedding_type,
+                                 use_attributes=use_attributes)
     return scenes
 
 

@@ -11,18 +11,7 @@ warnings.filterwarnings("ignore", message=r"\[W095\]", category=UserWarning)
 
 import torch
 
-_nlp = None
-
-
-def _get_nlp():
-    """Returns the lazily-loaded spaCy ``en_core_web_lg`` model."""
-    global _nlp
-    if _nlp is None:
-        import spacy
-        _nlp = spacy.load("en_core_web_lg")
-    return _nlp
-
-
+from whereami.utils.utils import _get_nlp
 from whereami.data_processing.create_text_embeddings import create_embedding, create_embedding_clip
 
 
@@ -206,7 +195,7 @@ def check_and_remove_invalid_edges(all_scenes):
                 try:
                     source = int(edge['source'])
                     target = int(edge['target'])
-                except:
+                except (ValueError, TypeError):
                     print(f'Error in scene {scene_id}, txt {txt_id}, source {source}, target {target}')
                     print("Removing edge")
                     all_scenes[scene_id][txt_id]['edges'].remove(edge)

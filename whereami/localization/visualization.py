@@ -28,25 +28,29 @@ GUI_INITIALISED = False
 
 def colour_objects(mesh: o3d.geometry.TriangleMesh,
                    obj2faces: dict[int, np.ndarray],
-                   focus: list[int]) -> o3d.geometry.TriangleMesh:
+                   focus: list[int],
+                   base: tuple[float, float, float] = (0.55, 0.55, 0.55),
+                   ) -> o3d.geometry.TriangleMesh:
     """Grey-out the mesh and assign random bright colours to selected objects.
 
     Args:
         mesh: Triangle mesh with vertex colours.
         obj2faces: Mapping from object ID to triangle-index arrays.
         focus: Object IDs to highlight.
+        base: RGB tuple for unmatched vertices.
 
     Returns:
         The same *mesh* with updated vertex colours (modified in-place).
     """
     rng = np.random.default_rng(42)
-    grey = np.full((len(mesh.vertices), 3), 0.55)
+    vcols = np.tile(base, (len(mesh.vertices), 1))
     tris = np.asarray(mesh.triangles)
     for oid in focus:
+        col = rng.random(3)
         for fid in obj2faces.get(oid, []):
             for vid in tris[fid]:
-                grey[int(vid)] = rng.random(3)
-    mesh.vertex_colors = o3d.utility.Vector3dVector(grey)
+                vcols[int(vid)] = col
+    mesh.vertex_colors = o3d.utility.Vector3dVector(vcols)
     return mesh
 
 

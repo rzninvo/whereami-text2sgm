@@ -1,0 +1,3 @@
+embedding_type: word2vec   # word2vec | clip | ada
+max_dist: 1.5
+use_attributes: true

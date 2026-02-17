@@ -101,7 +101,9 @@ def evaluate_scene(scene_id: str,
                    scene_graph,
                    mode: EvalMode,
                    cfg,
-                   rng: np.random.Generator) -> Optional[Union[SceneMetrics, Dict]]:
+                   rng: np.random.Generator,
+                   *,
+                   graph_cfg=None) -> Optional[Union[SceneMetrics, Dict]]:
     """Run localization evaluation for a single scene.
 
     Steps shared across all modes:
@@ -130,6 +132,8 @@ def evaluate_scene(scene_id: str,
         cfg: Configuration namespace (``argparse.Namespace``) or dict-like
             object with evaluation parameters.
         rng: NumPy random generator.
+        graph_cfg: Optional graph configuration with ``embedding_type``
+            and ``use_attributes``.
 
     Returns:
         - **standard / coarse_to_fine**: A :class:`SceneMetrics` instance,
@@ -162,7 +166,13 @@ def evaluate_scene(scene_id: str,
 
     frame = selection.frame
     try:
-        caption_graph, _ = frame_to_scenegraph(frame)
+        graph_kw = {}
+        if graph_cfg is not None:
+            graph_kw = dict(
+                embedding_type=graph_cfg.embedding_type,
+                use_attributes=graph_cfg.use_attributes,
+            )
+        caption_graph, _ = frame_to_scenegraph(frame, **graph_kw)
     except Exception as exc:
         if mode == EvalMode.CANDIDATES:
             return None
@@ -717,7 +727,7 @@ def _show_3d_scene(scene_id, scene_dir, mesh, obj2faces, obj_ids,
 #  Main evaluation loop
 # ---------------------------------------------------------------------------
 
-def run_evaluation(cfg) -> None:
+def run_evaluation(cfg, *, graph_cfg=None) -> None:
     """Run the full evaluation pipeline over multiple scenes.
 
     Loads scene graphs, filters candidate scene IDs, loops over scenes
@@ -728,12 +738,21 @@ def run_evaluation(cfg) -> None:
     Args:
         cfg: Configuration namespace or dict-like object.  Must contain
             at minimum ``root``, ``graphs``, and ``mode``.
+        graph_cfg: Optional graph configuration (from ``cfg.graph``) with
+            ``max_dist``, ``embedding_type``, and ``use_attributes``.
     """
     mode = EvalMode(_cfg_get(cfg, "mode", "standard"))
     rng = np.random.default_rng(seed=_cfg_get(cfg, "seed", 0))
     graphs_dir = Path(_cfg_get(cfg, "graphs"))
 
-    scenes = load_scene_graphs(graphs_dir)
+    graph_kw = {}
+    if graph_cfg is not None:
+        graph_kw = dict(
+            max_dist=graph_cfg.max_dist,
+            embedding_type=graph_cfg.embedding_type,
+            use_attributes=graph_cfg.use_attributes,
+        )
+    scenes = load_scene_graphs(graphs_dir, **graph_kw)
     root = Path(_cfg_get(cfg, "root"))
 
     candidate_ids = list(scenes.keys())
@@ -766,12 +785,12 @@ def run_evaluation(cfg) -> None:
     print(f"Evaluating {len(candidate_ids)} scene(s) in {mode.value} mode...\n")
 
     if mode == EvalMode.CANDIDATES:
-        _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng)
+        _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng, graph_cfg=graph_cfg)
     else:
-        _run_metrics_mode(candidate_ids, scenes, mode, cfg, rng)
+        _run_metrics_mode(candidate_ids, scenes, mode, cfg, rng, graph_cfg=graph_cfg)
 
 
-def _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng):
+def _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng, *, graph_cfg=None):
     """Execute candidates-mode evaluation and write JSON output."""
     try:
         from tqdm import tqdm
@@ -782,7 +801,7 @@ def _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng):
     results: List[Dict] = []
     skipped: List[Dict[str, str]] = []
     for sid in tqdm(candidate_ids, desc="Scenes", unit="scene"):
-        record = evaluate_scene(sid, scenes[sid], mode, cfg, rng)
+        record = evaluate_scene(sid, scenes[sid], mode, cfg, rng, graph_cfg=graph_cfg)
         if record is None:
             skipped.append({"scene_id": sid, "reason": "skipped"})
         else:
@@ -805,14 +824,14 @@ def _run_candidates_mode(candidate_ids, scenes, mode, cfg, rng):
     print(f"Wrote candidate poses to {output_path}")
 
 
-def _run_metrics_mode(candidate_ids, scenes, mode, cfg, rng):
+def _run_metrics_mode(candidate_ids, scenes, mode, cfg, rng, *, graph_cfg=None):
     """Execute standard or coarse_to_fine evaluation with metrics aggregation."""
     params_text = format_args_section(cfg)
 
     metrics_list: List[SceneMetrics] = []
     for idx, sid in enumerate(candidate_ids, start=1):
         print(f"[{idx:03d}/{len(candidate_ids):03d}] {sid}")
-        result = evaluate_scene(sid, scenes[sid], mode, cfg, rng)
+        result = evaluate_scene(sid, scenes[sid], mode, cfg, rng, graph_cfg=graph_cfg)
         if result is None or not isinstance(result, SceneMetrics):
             continue
         metrics_list.append(result)

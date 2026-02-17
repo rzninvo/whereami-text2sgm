@@ -9,6 +9,9 @@ import numpy as np
 import wandb
 import random
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
 from whereami.data_processing.scene_graph import SceneGraph
 from whereami.analysis.helper import get_matching_subgraph, calculate_overlap
 from whereami.models.model_graph2graph import BigGNN
@@ -30,7 +33,7 @@ def format_to_latex(acc):
     return acc_string
 
 
-def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
+def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
     """Runs one epoch of contrastive training over batched graph pairs.
 
     For each batch, computes pairwise cosine similarity and matching probability
@@ -43,7 +46,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
         dataset: List of query SceneGraph objects.
         batch_size: Number of graphs per batch.
         fold: Current fold index (for wandb logging).
-        args: Parsed arguments namespace.
+        cfg: Hydra DictConfig.
 
     Returns:
         The trained model.
@@ -51,7 +54,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
     assert type(dataset) == list, "dataset must be a list"
     indices = [i for i in range(len(dataset))]
     random.shuffle(indices)
-    if (args.contrastive_loss):
+    if (cfg.train.contrastive_loss):
         batched_indices = [indices[i:i+batch_size] for i in range(0, len(indices) - batch_size, batch_size)]
         assert len(batched_indices[0]) == batch_size, "First batch must be full-sized"
         skipped = 0
@@ -64,7 +67,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
                     total += 1
                     query = dataset[batch[i]]
                     db = database_3dssg[dataset[batch[j]].scene_id]
-                    if (args.subgraph_ablation):
+                    if (cfg.train.subgraph_ablation):
                         query_subgraph, db_subgraph = query, db
                     else:
                         query_subgraph, db_subgraph = get_matching_subgraph(query, db)
@@ -99,8 +102,8 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
 
             loss1 = cross_entropy(loss1, loss1_t, reduction='mean', dim=1)
             loss3 = cross_entropy(loss3, loss3_t, reduction='mean', dim=1)
-            if (args.loss_ablation_m): loss = loss1
-            elif (args.loss_ablation_c): loss = loss3
+            if (cfg.train.loss_ablation_m): loss = loss1
+            elif (cfg.train.loss_ablation_c): loss = loss3
             else: loss = (loss1 + loss3) / 2.0
 
             optimizer.zero_grad()
@@ -118,7 +121,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, args):
     return model
 
 
-def eval_loss(model, database_3dssg, dataset, fold, args):
+def eval_loss(model, database_3dssg, dataset, fold, cfg):
     """Evaluates the model loss on a validation dataset.
 
     Computes contrastive loss (cosine similarity + matching probability)
@@ -129,7 +132,7 @@ def eval_loss(model, database_3dssg, dataset, fold, args):
         database_3dssg: Dictionary mapping scene IDs to 3DSSG SceneGraph objects.
         dataset: List of validation SceneGraph objects.
         fold: Current fold index (for wandb logging).
-        args: Parsed arguments namespace.
+        cfg: Hydra DictConfig.
 
     Returns:
         Mean loss across all batches.
@@ -146,9 +149,9 @@ def eval_loss(model, database_3dssg, dataset, fold, args):
         assert type(dataset) == list, "dataset must be a list"
         indices = [i for i in range(len(dataset))]
         random.shuffle(indices)
-        if (args.contrastive_loss):
-            batched_indices = [indices[i:i+args.batch_size] for i in range(0, len(indices) - args.batch_size, args.batch_size)]
-            assert len(batched_indices[0]) == args.batch_size, "First batch must be full-sized"
+        if (cfg.train.contrastive_loss):
+            batched_indices = [indices[i:i+cfg.train.batch_size] for i in range(0, len(indices) - cfg.train.batch_size, cfg.train.batch_size)]
+            assert len(batched_indices[0]) == cfg.train.batch_size, "First batch must be full-sized"
             print(f'number of batches in evaluation: {len(batched_indices)}')
             skipped = 0
             total = 0
@@ -160,7 +163,7 @@ def eval_loss(model, database_3dssg, dataset, fold, args):
                         total += 1
                         query = dataset[batch[i]]
                         db = database_3dssg[dataset[batch[j]].scene_id]
-                        if (args.subgraph_ablation):
+                        if (cfg.train.subgraph_ablation):
                             query_subgraph, db_subgraph = query, db
                         else:
                             query_subgraph, db_subgraph = get_matching_subgraph(query, db)
@@ -194,8 +197,8 @@ def eval_loss(model, database_3dssg, dataset, fold, args):
 
                 loss1 = cross_entropy(loss1, loss1_t, reduction='mean', dim=1)
                 loss3 = cross_entropy(loss3, loss3_t, reduction='mean', dim=1)
-                if (args.loss_ablation_m or args.eval_only_c): loss = loss1
-                elif (args.loss_ablation_c): loss = loss3
+                if (cfg.train.loss_ablation_m or cfg.eval.eval_only_c): loss = loss1
+                elif (cfg.train.loss_ablation_c): loss = loss3
                 else: loss = (loss1 + loss3) / 2.0
 
                 loss1_across_batches.append(loss1.item())
@@ -219,7 +222,7 @@ def eval_loss(model, database_3dssg, dataset, fold, args):
     return torch.tensor(loss_across_batches).mean().item()
 
 
-def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval_iter_count=None, out_of=None, valid_top_k=[1, 2, 3, 5], timer=None):
+def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_iter_count=None, out_of=None, valid_top_k=[1, 2, 3, 5], timer=None):
     """Evaluates top-k retrieval accuracy by sampling scene subsets.
 
     For each evaluation iteration, samples ``out_of`` scenes, scores the query
@@ -231,10 +234,10 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
         database_3dssg: Dictionary mapping scene IDs to 3DSSG SceneGraph objects.
         dataset: List of query SceneGraph objects.
         fold: Current fold index (for wandb logging), or None.
-        args: Parsed arguments namespace.
+        cfg: Hydra DictConfig.
         mode: Evaluation mode string for wandb logging (e.g. ``'scanscribe'``).
-        eval_iter_count: Number of sample sets per eval iteration (overrides args).
-        out_of: Number of candidate scenes per sample set (overrides args).
+        eval_iter_count: Number of sample sets per eval iteration (overrides config).
+        out_of: Number of candidate scenes per sample set (overrides config).
         valid_top_k: List of k values for top-k accuracy.
         timer: Optional Timer instance for benchmarking.
 
@@ -242,9 +245,9 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
         Dictionary mapping each k to ``(mean_accuracy, std_accuracy)``.
     """
     if eval_iter_count is None:
-        eval_iter_count = args.eval_iter_count
+        eval_iter_count = cfg.eval.eval_iter_count
     if out_of is None:
-        out_of = args.out_of
+        out_of = cfg.eval.out_of
     model.eval()
 
     # Group dataset indices by scene_id
@@ -253,14 +256,14 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
         if g.scene_id not in buckets: buckets[g.scene_id] = []
         buckets[g.scene_id].append(idx)
 
-    if args.eval_entire_dataset:
+    if cfg.eval.eval_entire_dataset:
         out_of = len(buckets)
         valid_top_k = [1, 5, 10, 20, 30, 40]
         if mode == 'human' or mode == 'human_test':
             valid_top_k.extend([50, 75])
 
     all_valid = {}
-    for _ in range(args.eval_iters):
+    for _ in range(cfg.eval.eval_iters):
         valid = {k: [] for k in valid_top_k}
 
         sampled_test_indices = [[random.sample(buckets[g], 1)[0] for g in random.sample(list(buckets.keys()), out_of)] for _ in range(eval_iter_count)]
@@ -280,7 +283,7 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
                 scene_ids_tset.append(db.scene_id)
                 assert (query.scene_id == db.scene_id if i == t_set[0] else query.scene_id != db.scene_id), \
                     "First element must be ground-truth match"
-                if (args.subgraph_ablation):
+                if (cfg.train.subgraph_ablation):
                     query_subgraph, db_subgraph = query, db
                 else:
                     query_subgraph, db_subgraph = get_matching_subgraph(query, db)
@@ -302,7 +305,7 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
                 if (query.scene_id == db.scene_id): true_match.append(1)
                 else: true_match.append(0)
 
-            if (args.loss_ablation_m or args.eval_only_c):
+            if (cfg.train.loss_ablation_m or cfg.eval.eval_only_c):
                 cos_sims = np.array(cos_sims)
                 true_match = np.array(true_match)
                 t1 = time.time()
@@ -313,7 +316,7 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
                     timer.text2graph_matching_iter.append(1)
                 cos_sims = cos_sims[sorted_indices]
                 true_match = true_match[sorted_indices]
-            elif (args.loss_ablation_c):
+            elif (cfg.train.loss_ablation_c):
                 match_prob = np.array(match_prob)
                 true_match = np.array(true_match)
                 t1 = time.time()
@@ -355,7 +358,7 @@ def eval_acc(model, database_3dssg, dataset, fold, args, mode='scanscribe', eval
     return accuracy
 
 
-def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_size, entire_training_set, args):
+def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_size, entire_training_set, cfg):
     """Trains the model with optional k-fold cross-validation.
 
     If ``entire_training_set`` is True, trains on all data without validation.
@@ -369,23 +372,23 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
         epochs: Number of training epochs.
         batch_size: Number of graphs per batch.
         entire_training_set: If True, skip cross-validation and train on all data.
-        args: Parsed arguments namespace.
+        cfg: Hydra DictConfig.
 
     Returns:
         The trained model.
     """
-    ckpt_dir = Path(args.data_root) / 'model_checkpoints' / 'graph2graph'
+    ckpt_dir = Path(cfg.paths.checkpoint_dir)
     if entire_training_set:
-        if args.continue_training:
-            model = BigGNN(args.N, args.heads).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{args.continue_training_model}.pt')
+        if cfg.train.continue_training:
+            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(args.N, args.heads).to('cuda')
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
-        if (args.continue_training):
-            starting_epoch = args.continue_training
+        if (cfg.train.continue_training):
+            starting_epoch = cfg.train.continue_training
         epochs = epochs + starting_epoch
         for epoch in tqdm(range(starting_epoch, epochs)):
             _ = train(model=model,
@@ -394,9 +397,9 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
                                dataset=dataset,
                                batch_size=batch_size,
                                fold=None,
-                               args=args)
+                               cfg=cfg)
             if epoch % 2 == 0:
-                torch.save(model.state_dict(), ckpt_dir / f'{args.model_name}_epoch_{epoch}_checkpoint.pt')
+                torch.save(model.state_dict(), ckpt_dir / f'{cfg.train.model_name}_epoch_{epoch}_checkpoint.pt')
         return model
 
     # K-fold cross-validation
@@ -408,16 +411,16 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
         print(f'length of training set in fold {fold}: {len(train_dataset)}')
         print(f'length of validation set in fold {fold}: {len(val_dataset)}')
 
-        if args.continue_training:
-            model = BigGNN(args.N, args.heads).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{args.continue_training_model}.pt')
+        if cfg.train.continue_training:
+            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(args.N, args.heads).to('cuda')
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
-        if (args.continue_training):
-            starting_epoch = args.continue_training
+        if (cfg.train.continue_training):
+            starting_epoch = cfg.train.continue_training
         epochs = epochs + starting_epoch
         for epoch in tqdm(range(starting_epoch, epochs)):
             _ = train(model=model,
@@ -426,19 +429,19 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
                                dataset=train_dataset,
                                batch_size=batch_size,
                                fold=fold,
-                               args=args)
+                               cfg=cfg)
             if epoch % 2 == 0:
-                torch.save(model.state_dict(), ckpt_dir / f'{args.model_name}_epoch_{epoch}_checkpoint.pt')
+                torch.save(model.state_dict(), ckpt_dir / f'{cfg.train.model_name}_epoch_{epoch}_checkpoint.pt')
             val_losses.append(eval_loss(model=model,
                                         database_3dssg=database_3dssg,
                                         dataset=val_dataset,
                                         fold=fold,
-                                        args=args))
+                                        cfg=cfg))
             accs.append(eval_acc(model=model,
                                  database_3dssg=database_3dssg,
                                  dataset=val_dataset,
                                  fold=fold,
-                                 args=args,
+                                 cfg=cfg,
                                  eval_iter_count=30))
             eval_info = {
                 'fold': fold,
@@ -449,51 +452,47 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
             }
             print(f'Evaluation information: {eval_info}')
 
-        if (args.skip_k_fold): break
+        if (cfg.train.skip_k_fold): break
 
     return model
 
 
-if __name__ == '__main__':
-    from whereami.models.args import get_args
-    args = get_args()
+def run_training(cfg: DictConfig) -> None:
+    """Main training entry point.
 
+    Args:
+        cfg: Merged Hydra configuration.
+    """
     torch.cuda.empty_cache()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = cfg.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     print(torch.cuda.current_device())
-    random.seed(42)
+    random.seed(cfg.seed)
 
-    if (args.model_name is None):
-        print("Must define a model name")
-        print("Exiting...")
-        exit()
-    if (args.loss_ablation_m and args.loss_ablation_c):
-        print("Can only have one loss ablation true at a time")
-        print("Exiting...")
-        exit()
+    if cfg.train.model_name is None:
+        raise ValueError("train.model_name is required. Set via CLI: train.model_name=my_model")
+    if (cfg.train.loss_ablation_m and cfg.train.loss_ablation_c):
+        raise ValueError("Can only have one loss ablation true at a time")
 
-    data_root = Path(args.data_root)
-    graphs_dir = data_root / 'processed_data'
-    ckpt_dir = data_root / 'model_checkpoints' / 'graph2graph'
+    ckpt_dir = Path(cfg.paths.checkpoint_dir)
 
-    wandb.config = { "architecture": "self attention cross attention",
-                     "dataset": "ScanScribe_cleaned"}
-    for arg in vars(args): wandb.config[arg] = getattr(args, arg)
     wandb.init(project="graph2graph",
-                mode=args.mode,
-                config=wandb.config)
+                mode=cfg.mode,
+                config=OmegaConf.to_container(cfg, resolve=True))
 
     _3dssg_graphs = {}
-    _3dssg_scenes = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt')
+    _3dssg_scenes = torch.load(cfg.paths.graphs_3dssg)
     for sceneid in tqdm(_3dssg_scenes):
         _3dssg_graphs[sceneid] = SceneGraph(sceneid,
                                             graph_type='3dssg',
                                             graph=_3dssg_scenes[sceneid],
-                                            max_dist=1.0, embedding_type='word2vec',
-                                            use_attributes=args.use_attributes)
+                                            max_dist=cfg.graph.max_dist,
+                                            embedding_type=cfg.graph.embedding_type,
+                                            use_attributes=cfg.graph.use_attributes)
 
     scanscribe_graphs = {}
-    scanscribe_scenes = torch.load(graphs_dir / 'training' / 'scanscribe_graphs_train_final_no_graph_min.pt')
+    scanscribe_scenes = torch.load(cfg.paths.scanscribe_train)
     for scene_id in tqdm(scanscribe_scenes):
         txtids = scanscribe_scenes[scene_id].keys()
         assert len(set(txtids)) == len(txtids), "Duplicate text IDs found"
@@ -504,8 +503,8 @@ if __name__ == '__main__':
                                                                         txt_id=txt_id,
                                                                         graph_type='scanscribe',
                                                                         graph=scanscribe_scenes[scene_id][txt_id],
-                                                                        embedding_type='word2vec',
-                                                                        use_attributes=args.use_attributes)
+                                                                        embedding_type=cfg.graph.embedding_type,
+                                                                        use_attributes=cfg.graph.use_attributes)
 
     print(f'number of scanscribe graphs before removing graphs with 1 edge: {len(scanscribe_graphs)}')
     to_remove = []
@@ -515,10 +514,9 @@ if __name__ == '__main__':
     for g in to_remove: del scanscribe_graphs[g]
     print(f'number of scanscribe graphs after removing graphs with 1 edge: {len(scanscribe_graphs)}')
     scanscribe_graphs = list(scanscribe_graphs.values())
-    args.training_set_size = len(scanscribe_graphs)
 
     scanscribe_graphs_test = {}
-    scanscribe_scenes_test = torch.load(graphs_dir / 'testing' / 'scanscribe_graphs_test_final_no_graph_min.pt')
+    scanscribe_scenes_test = torch.load(cfg.paths.scanscribe_test)
     for scene_id in tqdm(scanscribe_scenes_test):
         txtids = scanscribe_scenes_test[scene_id].keys()
         assert len(set(txtids)) == len(txtids), "Duplicate text IDs found"
@@ -529,8 +527,8 @@ if __name__ == '__main__':
                                                                         txt_id=txt_id,
                                                                         graph_type='scanscribe',
                                                                         graph=scanscribe_scenes_test[scene_id][txt_id],
-                                                                        embedding_type='word2vec',
-                                                                        use_attributes=args.use_attributes)
+                                                                        embedding_type=cfg.graph.embedding_type,
+                                                                        use_attributes=cfg.graph.use_attributes)
 
     print(f'number of scanscribe test graphs before removing: {len(scanscribe_graphs_test)}')
     to_remove = []
@@ -539,9 +537,8 @@ if __name__ == '__main__':
             to_remove.append(g)
     for g in to_remove: del scanscribe_graphs_test[g]
     print(f'number of scanscribe test graphs after removing: {len(scanscribe_graphs_test)}')
-    args.test_set_size = len(scanscribe_graphs_test)
 
-    h_graphs_test = torch.load(graphs_dir / 'human' / 'human_graphs_processed.pt')
+    h_graphs_test = torch.load(cfg.paths.human_graphs)
     h_graphs_remove = [k for k in h_graphs_test if k.split('_')[0] not in _3dssg_graphs]
     print(f'to remove human_graphs, hopefully none: {h_graphs_remove}')
     for k in h_graphs_remove: del h_graphs_test[k]
@@ -550,8 +547,8 @@ if __name__ == '__main__':
     human_graphs_test = {k: SceneGraph(k.split('_')[0],
                                    graph_type='human',
                                    graph=h_graphs_test[k],
-                                   embedding_type='word2vec',
-                                   use_attributes=args.use_attributes) for k in h_graphs_test}
+                                   embedding_type=cfg.graph.embedding_type,
+                                   use_attributes=cfg.graph.use_attributes) for k in h_graphs_test}
 
     ###################### MEMORY SIZE ANALYSIS ######################
     b_n = 0
@@ -586,27 +583,26 @@ if __name__ == '__main__':
     print(f'SCANSCRIBE b_n: {b_n}, b_e: {b_e}, b_f: {b_f}, total: {b_n + b_e + b_f}')
     print(f'HUMAN b_n_h: {b_n_h}, b_e_h: {b_e_h}, b_f_h: {b_f_h}, total: {b_n_h + b_e_h + b_f_h}')
 
-    if args.training_with_cross_val:
-        if args.continue_training:
-            model = BigGNN(args.N, args.heads).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{args.continue_training_model}.pt')
+    if cfg.train.training_with_cross_val:
+        if cfg.train.continue_training:
+            model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
             model.load_state_dict(model_dict)
-        else: model = BigGNN(args.N, args.heads).to('cuda')
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        else: model = BigGNN(cfg.model.N, cfg.model.heads).to('cuda')
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
         model = train_with_cross_val(database_3dssg=_3dssg_graphs,
                                         dataset=scanscribe_graphs,
                                         model=model,
-                                        folds=args.folds,
-                                        epochs=args.epoch,
-                                        batch_size=args.batch_size,
-                                        entire_training_set=args.entire_training_set,
-                                        args=args)
+                                        folds=cfg.train.folds,
+                                        epochs=cfg.train.epoch,
+                                        batch_size=cfg.train.batch_size,
+                                        entire_training_set=cfg.train.entire_training_set,
+                                        cfg=cfg)
 
     ######### SAVE MODEL #########
-    model_name = args.model_name
-    args_str = ''
-    for arg in vars(args): args_str += f'\n{arg}_{getattr(args, arg)}'
-    with open(ckpt_dir / f'{model_name}_args.txt', 'w') as f: f.write(args_str)
+    model_name = cfg.train.model_name
+    cfg_str = OmegaConf.to_yaml(cfg)
+    with open(ckpt_dir / f'{model_name}_args.txt', 'w') as f: f.write(cfg_str)
     torch.save(model.state_dict(), ckpt_dir / f'{model_name}.pt')
 
     t_start = time.perf_counter()
@@ -614,15 +610,25 @@ if __name__ == '__main__':
                                      database_3dssg=_3dssg_graphs,
                                      dataset=list(scanscribe_graphs_test.values()),
                                      fold=None,
-                                     args=args,
+                                     cfg=cfg,
                                      mode='scanscribe_test')
     human_test_accuracy = eval_acc(model=model,
                                      database_3dssg=_3dssg_graphs,
                                      dataset=list(human_graphs_test.values()),
                                      fold=None,
-                                     args=args,
+                                     cfg=cfg,
                                      mode='human_test')
     t_end = time.perf_counter()
     print(f'Time elapsed in minutes: {(t_end - t_start) / 60}')
 
     print(f'Final test set accuracies: scanscribe {scanscribe_test_accuracy}, human {human_test_accuracy}')
+
+
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Hydra CLI entry point for training."""
+    run_training(cfg)
+
+
+if __name__ == '__main__':
+    main()

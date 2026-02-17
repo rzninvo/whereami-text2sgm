@@ -2,10 +2,6 @@ epoch: 10
 lr: 0.0001
 weight_decay: 5.0e-5
 batch_size: 16
-N: 1
-heads: 2
-graph_size_min: 4
-use_attributes: true
 contrastive_loss: true
 training_with_cross_val: true
 folds: 5
@@ -17,10 +13,6 @@ loss_ablation_c: false
 eval_only_c: false
 continue_training: 0
 continue_training_model: null
-model_name: ???     # required — set via CLI
-overlap_thr: 0.8
-cos_sim_thr: 0.5
-training_set_size: null
-test_set_size: null
+model_name: null
 scannet: false
 scanscribe_auto_gen: false

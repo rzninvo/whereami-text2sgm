@@ -1,23 +1,16 @@
 data_root: ${oc.env:WHEREAMI_DATA_ROOT, ./data}
 graphs_dir: ${paths.data_root}/processed_data
 checkpoint_dir: ${paths.data_root}/model_checkpoints/graph2graph
+rscan_root: ${oc.env:RSCAN_ROOT, null}
 
-# 3DSSG
-3dssg_graphs: ${paths.graphs_dir}/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt
-
-# ScanScribe
+# Graph data files
+graphs_3dssg: ${paths.graphs_dir}/3dssg/3dssg_graphs_processed_edgelists_relationembed.pt
 scanscribe_train: ${paths.graphs_dir}/training/scanscribe_graphs_train_final_no_graph_min.pt
 scanscribe_test: ${paths.graphs_dir}/testing/scanscribe_graphs_test_final_no_graph_min.pt
-scanscribe_auto_gen: ${paths.graphs_dir}/scanscribe/scanscribe_text_graphs_from_image_desc_node_edge_features.pt
-
-# Human
+scanscribe_text: ${paths.graphs_dir}/scanscribe/scanscribe_text_graphs_from_image_desc_node_edge_features.pt
 human_graphs: ${paths.graphs_dir}/human/human_graphs_processed.pt
+sgfusion_graphs: ${paths.graphs_dir}/sgfusion/sgfusion_graphs.pt
+sgfusion_text_graphs: ${paths.graphs_dir}/sgfusion/sgfusion_text_graphs.pt
 
-# 3RScan mesh root
-3rscan_root: ${oc.env:RSCAN_ROOT, null}
-
-# Evaluation output directory
-eval_outputs: ${paths.data_root}/eval_outputs
-
-# Query root (frame JSONs with GT poses)
 query_root: null
+eval_output_dir: ${paths.data_root}/eval_outputs

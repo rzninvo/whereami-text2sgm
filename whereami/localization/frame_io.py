@@ -279,7 +279,7 @@ def load_scene_graphs(graphs_dir: Path,
     g3d_path = graphs_dir / "3dssg" / "3dssg_graphs_processed_edgelists_relationembed.pt"
     if not g3d_path.exists():
         raise FileNotFoundError(g3d_path)
-    g3d = torch.load(g3d_path, map_location="cpu")
+    g3d = torch.load(g3d_path, map_location="cpu", weights_only=False)
     scenes: Dict[str, SceneGraph] = {}
     for sid, graph in g3d.items():
         scenes[sid] = SceneGraph(sid,

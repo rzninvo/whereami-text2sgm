@@ -47,7 +47,7 @@ def load_scene_graphs(path):
     Returns:
         Dictionary of loaded scene graphs.
     """
-    graphs = torch.load(path)
+    graphs = torch.load(path, weights_only=False)
     return graphs
 
 
@@ -60,7 +60,7 @@ def load_text_graphs(path):
     Returns:
         Dictionary of loaded text graphs.
     """
-    graphs = torch.load(path)
+    graphs = torch.load(path, weights_only=False)
     return graphs
 
 

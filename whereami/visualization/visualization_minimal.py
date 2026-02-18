@@ -89,7 +89,7 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
     scan_dir = Path(cfg.paths.rscan_root) / scan_id
 
     # load 3D scene-graph
-    scenes = torch.load(cfg.paths.graphs_3dssg, map_location=device)
+    scenes = torch.load(cfg.paths.graphs_3dssg, map_location=device, weights_only=False)
     if scan_id not in scenes:
         raise ValueError(f"{scan_id} not found in 3dssg graphs")
     sg = SceneGraph(scan_id,
@@ -100,7 +100,7 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
                     use_attributes=cfg.graph.use_attributes)
 
     # load captions
-    caps_raw = torch.load(cfg.paths.scanscribe_text, map_location=device)
+    caps_raw = torch.load(cfg.paths.scanscribe_text, map_location=device, weights_only=False)
     captions = {
       k: SceneGraph(scan_id,
                     graph_type="scanscribe",
@@ -119,7 +119,7 @@ def run_visualization_minimal(cfg: DictConfig) -> None:
         if BigGNN is None:
             raise ImportError("BigGNN not available")
         ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         model.load_state_dict(ckpt)
         model.eval()

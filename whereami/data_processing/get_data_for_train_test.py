@@ -101,9 +101,9 @@ if __name__ == '__main__':
     data_root = Path(cli_args.data_root)
     graphs_dir = data_root / 'processed_data'
 
-    _3dssg_graphs = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt')
-    scanscribe_graphs = torch.load(graphs_dir / 'scanscribe' / 'scanscribe_cleaned_original_node_edge_features.pt')
-    human_graphs = torch.load(graphs_dir / 'human' / 'human_graphs_processed.pt')
+    _3dssg_graphs = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt', weights_only=False)
+    scanscribe_graphs = torch.load(graphs_dir / 'scanscribe' / 'scanscribe_cleaned_original_node_edge_features.pt', weights_only=False)
+    human_graphs = torch.load(graphs_dir / 'human' / 'human_graphs_processed.pt', weights_only=False)
 
     with open(cli_args.scanscribe_text, 'r') as f:
         scanscribe_text = json.load(f)
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     print(f'Testing scenes: {len(testing_scene_ids)}')
 
     if cli_args.pc_data:
-        _3dssg_pc = torch.load(cli_args.pc_data)
+        _3dssg_pc = torch.load(cli_args.pc_data, weights_only=False)
         testing_text_human, testing_cells_human = human_get_text_cells(human_text, _3dssg_pc)
         output_dir = Path(cli_args.output_dir) if cli_args.output_dir else data_root
         torch.save(testing_text_human, output_dir / 'testing_text_human_text2pos.pt')

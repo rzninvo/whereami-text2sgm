@@ -85,8 +85,8 @@ def run_inference(cfg: DictConfig) -> None:
     t0 = time.perf_counter()
 
     # Load graphs
-    g3d_raw = torch.load(cfg.paths.graphs_3dssg, map_location="cpu")
-    scans_raw = torch.load(cfg.paths.scanscribe_text, map_location="cpu")
+    g3d_raw = torch.load(cfg.paths.graphs_3dssg, map_location="cpu", weights_only=False)
+    scans_raw = torch.load(cfg.paths.scanscribe_text, map_location="cpu", weights_only=False)
 
     database_3dssg = {
         sid: SceneGraph(sid, graph_type="3dssg", graph=g,
@@ -112,7 +112,7 @@ def run_inference(cfg: DictConfig) -> None:
     ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
 
     model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
-    model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
 
     # For each caption, rank all scenes

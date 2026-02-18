@@ -93,7 +93,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, required=True, help='Path to input .pt file to inspect')
     cli_args = parser.parse_args()
 
-    all_scenes = torch.load(cli_args.input)
+    all_scenes = torch.load(cli_args.input, weights_only=False)
     sample_key = list(all_scenes.keys())[0]
     print(f'Sample scene: {sample_key}')
     print(f'Total scenes: {len(all_scenes)}')

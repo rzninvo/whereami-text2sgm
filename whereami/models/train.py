@@ -387,7 +387,7 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
     if entire_training_set:
         if cfg.train.continue_training:
             model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
         else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
@@ -419,7 +419,7 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
 
         if cfg.train.continue_training:
             model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
         else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
@@ -488,7 +488,7 @@ def run_training(cfg: DictConfig) -> None:
                 config=OmegaConf.to_container(cfg, resolve=True))
 
     _3dssg_graphs = {}
-    _3dssg_scenes = torch.load(cfg.paths.graphs_3dssg)
+    _3dssg_scenes = torch.load(cfg.paths.graphs_3dssg, weights_only=False)
     for sceneid in tqdm(_3dssg_scenes):
         _3dssg_graphs[sceneid] = SceneGraph(sceneid,
                                             graph_type='3dssg',
@@ -498,7 +498,7 @@ def run_training(cfg: DictConfig) -> None:
                                             use_attributes=cfg.graph.use_attributes)
 
     scanscribe_graphs = {}
-    scanscribe_scenes = torch.load(cfg.paths.scanscribe_train)
+    scanscribe_scenes = torch.load(cfg.paths.scanscribe_train, weights_only=False)
     for scene_id in tqdm(scanscribe_scenes):
         txtids = scanscribe_scenes[scene_id].keys()
         assert len(set(txtids)) == len(txtids), "Duplicate text IDs found"
@@ -522,7 +522,7 @@ def run_training(cfg: DictConfig) -> None:
     scanscribe_graphs = list(scanscribe_graphs.values())
 
     scanscribe_graphs_test = {}
-    scanscribe_scenes_test = torch.load(cfg.paths.scanscribe_test)
+    scanscribe_scenes_test = torch.load(cfg.paths.scanscribe_test, weights_only=False)
     for scene_id in tqdm(scanscribe_scenes_test):
         txtids = scanscribe_scenes_test[scene_id].keys()
         assert len(set(txtids)) == len(txtids), "Duplicate text IDs found"
@@ -544,7 +544,7 @@ def run_training(cfg: DictConfig) -> None:
     for g in to_remove: del scanscribe_graphs_test[g]
     print(f'number of scanscribe test graphs after removing: {len(scanscribe_graphs_test)}')
 
-    h_graphs_test = torch.load(cfg.paths.human_graphs)
+    h_graphs_test = torch.load(cfg.paths.human_graphs, weights_only=False)
     h_graphs_remove = [k for k in h_graphs_test if k.split('_')[0] not in _3dssg_graphs]
     print(f'to remove human_graphs, hopefully none: {h_graphs_remove}')
     for k in h_graphs_remove: del h_graphs_test[k]
@@ -592,7 +592,7 @@ def run_training(cfg: DictConfig) -> None:
     if cfg.train.training_with_cross_val:
         if cfg.train.continue_training:
             model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
-            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt')
+            model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
         else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)

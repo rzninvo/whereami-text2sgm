@@ -299,7 +299,7 @@ if __name__ == '__main__':
     graphs_dir = Path(cli_args.data_root) / 'processed_data'
 
     ######## 3DSSG #########
-    _3dssg_scenes = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt')
+    _3dssg_scenes = torch.load(graphs_dir / '3dssg' / '3dssg_graphs_processed_edgelists_relationembed.pt', weights_only=False)
     for sceneid in tqdm(_3dssg_scenes):
         sg = SceneGraph(sceneid,
                         graph_type='3dssg',
@@ -307,7 +307,7 @@ if __name__ == '__main__':
                         max_dist=1.0, embedding_type='ada')
 
     ######### ScanScribe #########
-    scanscribe_scenes = torch.load(graphs_dir / 'scanscribe' / 'scanscribe_cleaned_original_node_edge_features.pt')
+    scanscribe_scenes = torch.load(graphs_dir / 'scanscribe' / 'scanscribe_cleaned_original_node_edge_features.pt', weights_only=False)
     for scene_id in tqdm(scanscribe_scenes):
         txtids = scanscribe_scenes[scene_id].keys()
         assert len(set(txtids)) == len(txtids), "Duplicate text IDs found"

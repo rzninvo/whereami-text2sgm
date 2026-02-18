@@ -124,7 +124,7 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
         raise ValueError("paths.rscan_root is required. Place 3RScan data in ./data/3rscan or override paths.rscan_root=...")
 
     # load scene-graphs
-    raw3d = torch.load(cfg.paths.graphs_3dssg, map_location="cpu")
+    raw3d = torch.load(cfg.paths.graphs_3dssg, map_location="cpu", weights_only=False)
     database_3dssg = {
       sid: SceneGraph(sid, graph_type="3dssg", graph=g,
                       max_dist=cfg.graph.max_dist,
@@ -134,7 +134,7 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
     }
 
     # load text-graphs
-    rawtxt = torch.load(cfg.paths.scanscribe_text, map_location="cpu")
+    rawtxt = torch.load(cfg.paths.scanscribe_text, map_location="cpu", weights_only=False)
     dataset = [
       SceneGraph(k.split("_")[0], txt_id=None,
                  graph=g, graph_type="human",
@@ -148,7 +148,7 @@ def run_visualization_graph_object(cfg: DictConfig) -> None:
     ckpt_dir = Path(cfg.paths.checkpoint_dir)
     if cfg.eval.model_name is not None:
         ckpt_path = ckpt_dir / f"{cfg.eval.model_name}.pt"
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         model.load_state_dict(ckpt)
         model.eval()

@@ -249,5 +249,5 @@ if __name__ == "__main__":
     parser.add_argument('--output', type=str, default=None, help='Path to output .pt file')
     cli_args = parser.parse_args()
 
-    all_scenes = torch.load(cli_args.input)
+    all_scenes = torch.load(cli_args.input, weights_only=False)
     add_edge_list(all_scenes, output_path=cli_args.output)

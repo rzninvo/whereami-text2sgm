@@ -43,7 +43,7 @@ def run_eval(cfg: DictConfig) -> None:
 
     # 3DSSG
     _3dssg_graphs = {}
-    _3dssg_scenes = torch.load(cfg.paths.graphs_3dssg)
+    _3dssg_scenes = torch.load(cfg.paths.graphs_3dssg, weights_only=False)
     for sceneid in tqdm(_3dssg_scenes):
         _3dssg_graphs[sceneid] = SceneGraph(sceneid,
                                             graph_type='3dssg',
@@ -54,7 +54,7 @@ def run_eval(cfg: DictConfig) -> None:
 
     # ScanScribe Test
     scanscribe_graphs_test = {}
-    scanscribe_scenes = torch.load(cfg.paths.scanscribe_text)
+    scanscribe_scenes = torch.load(cfg.paths.scanscribe_text, weights_only=False)
     for scene_id in tqdm(scanscribe_scenes):
         scanscribe_graphs_test[scene_id] = SceneGraph(scene_id,
                                                 txt_id=None,
@@ -72,7 +72,7 @@ def run_eval(cfg: DictConfig) -> None:
     print(f'number of scanscribe test graphs after removing: {len(scanscribe_graphs_test)}')
 
     # Human Test
-    h_graphs_test = torch.load(cfg.paths.human_graphs)
+    h_graphs_test = torch.load(cfg.paths.human_graphs, weights_only=False)
     h_graphs_remove = [k for k in h_graphs_test if k.split('_')[0] not in _3dssg_graphs]
     print(f'to remove human_graphs, hopefully none: {h_graphs_remove}')
     for k in h_graphs_remove: del h_graphs_test[k]
@@ -84,14 +84,14 @@ def run_eval(cfg: DictConfig) -> None:
                                    embedding_type=cfg.graph.embedding_type,
                                    use_attributes=cfg.graph.use_attributes) for k in h_graphs_test}
 
-    scannet_test_graphs = torch.load(cfg.paths.sgfusion_graphs)
+    scannet_test_graphs = torch.load(cfg.paths.sgfusion_graphs, weights_only=False)
     scannet_test_graphs = {k: SceneGraph(k,
                                       graph_type='human',
                                       graph=scannet_test_graphs[k],
                                       embedding_type=cfg.graph.embedding_type,
                                       use_attributes=cfg.graph.use_attributes) for k in scannet_test_graphs}
 
-    scannet_test_text_graphs = torch.load(cfg.paths.sgfusion_text_graphs)
+    scannet_test_text_graphs = torch.load(cfg.paths.sgfusion_text_graphs, weights_only=False)
     scannet_test_text_graphs = {k: SceneGraph(k,
                                         graph_type='human',
                                         graph=scannet_test_text_graphs[k],
@@ -99,7 +99,7 @@ def run_eval(cfg: DictConfig) -> None:
                                         use_attributes=cfg.graph.use_attributes) for k in scannet_test_text_graphs}
 
     model_name = cfg.eval.model_name
-    model_state_dict = torch.load(ckpt_dir / f'{model_name}.pt')
+    model_state_dict = torch.load(ckpt_dir / f'{model_name}.pt', weights_only=False)
     model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
     model.load_state_dict(model_state_dict)
 

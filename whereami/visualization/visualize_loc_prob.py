@@ -53,7 +53,7 @@ def run_visualize_loc_prob(cfg: DictConfig) -> None:
     rscan_root = Path(cfg.paths.rscan_root)
     loc = cfg.localization
 
-    g3d = torch.load(cfg.paths.graphs_3dssg, map_location="cpu")
+    g3d = torch.load(cfg.paths.graphs_3dssg, map_location="cpu", weights_only=False)
     scenes = {sid: SceneGraph(sid,
                               graph_type="3dssg",
                               graph=g,
@@ -62,7 +62,7 @@ def run_visualize_loc_prob(cfg: DictConfig) -> None:
                               use_attributes=cfg.graph.use_attributes)
               for sid, g in g3d.items()}
 
-    gtxt = torch.load(cfg.paths.scanscribe_text, map_location="cpu")
+    gtxt = torch.load(cfg.paths.scanscribe_text, map_location="cpu", weights_only=False)
     queries = [SceneGraph(k.split("_")[0],
                           txt_id=None,
                           graph=g,

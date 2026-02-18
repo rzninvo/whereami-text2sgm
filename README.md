@@ -112,10 +112,10 @@ Key options:
 | Flag | Default | Description |
 | --- | --- | --- |
 | `train.model_name` | *required* | Name for saved checkpoints |
-| `train.epoch` | 10 | Number of training epochs |
+| `train.epoch` | 30 | Number of training epochs |
 | `train.lr` | 0.0001 | Learning rate |
 | `train.batch_size` | 16 | Pairs per contrastive batch |
-| `train.folds` | 5 | Cross-validation folds |
+| `train.folds` | 10 | Cross-validation folds |
 | `train.entire_training_set` | false | Skip CV, train on everything |
 | `train.subgraph_ablation` | false | Disable DBSCAN subgraph matching |
 | `mode` | online | W&B logging: online / offline / disabled |
@@ -220,6 +220,27 @@ Override anything from the CLI:
 ```bash
 python -m whereami.models.train \
     model.N=2 model.heads=4 graph.embedding_type=clip train.epoch=50
+```
+
+---
+
+## Scripts
+
+Pre-configured shell scripts live in `scripts/` for common workflows:
+
+| Script | What it does |
+| --- | --- |
+| `scripts/run.sh` | Train with subgraph ablation on the full dataset |
+| `scripts/run_eval.sh` | Evaluate a trained checkpoint |
+| `scripts/run_inference_scanscribe.sh` | Batch inference on ScanScribe captions |
+| `scripts/visualize.sh` | Visualise matched objects for a single scene |
+| `scripts/visualize_loc_prob.sh` | Free-text query localisation with heatmap |
+| `scripts/visualize_eval_loc.sh` | Run localisation evaluation with metrics output |
+
+Edit the `model_name` and `scan_id` values inside each script to match your setup, then run:
+
+```bash
+bash scripts/run.sh
 ```
 
 ---

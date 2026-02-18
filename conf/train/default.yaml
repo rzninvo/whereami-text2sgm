@@ -6,7 +6,7 @@
 # =============================================================================
 
 # Number of training epochs.
-epoch: 10
+epoch: 30
 
 # Adam optimiser learning rate.
 lr: 0.0001
@@ -24,7 +24,7 @@ contrastive_loss: true
 training_with_cross_val: true
 
 # Number of folds for cross-validation.
-folds: 5
+folds: 10
 
 # If true, run only the first fold then stop (useful for quick validation).
 skip_k_fold: false

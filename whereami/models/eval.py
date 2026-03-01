@@ -23,11 +23,12 @@ def run_eval(cfg: DictConfig) -> None:
     Args:
         cfg: Merged Hydra configuration.
     """
-    torch.cuda.empty_cache()
     device = cfg.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(torch.cuda.current_device())
+    if device != "cpu":
+        torch.cuda.empty_cache()
+        print(torch.cuda.current_device())
     random.seed(cfg.seed)
 
     if cfg.eval.model_name is None:
@@ -100,7 +101,7 @@ def run_eval(cfg: DictConfig) -> None:
 
     model_name = cfg.eval.model_name
     model_state_dict = torch.load(ckpt_dir / f'{model_name}.pt', weights_only=False)
-    model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+    model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
     model.load_state_dict(model_state_dict)
 
     if cfg.eval.eval_entire_dataset:
@@ -121,7 +122,8 @@ def run_eval(cfg: DictConfig) -> None:
                                     fold=None,
                                     cfg=cfg,
                                     mode='scanscribe_test',
-                                    timer=scanscribe_timer)
+                                    timer=scanscribe_timer,
+                                    device=device)
     print(f'accuracy on scanscribe test set: {scanscribe_test_acc}')
     end_scanscribe = time.time()
     print(f'time for scanscribe test set: {end_scanscribe - start}')
@@ -138,7 +140,8 @@ def run_eval(cfg: DictConfig) -> None:
                                     cfg=cfg,
                                     mode='human_test',
                                     valid_top_k=list(cfg.eval.valid_top_k),
-                                    timer=human_timer)
+                                    timer=human_timer,
+                                    device=device)
     print(f'accuracy on human test set: {human_test_acc}')
     end_human = time.time()
     print(f'time for human test set: {end_human - start}')

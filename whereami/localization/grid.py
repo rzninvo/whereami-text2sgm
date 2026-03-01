@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import open3d as o3d
@@ -66,6 +66,53 @@ def load_scene(scan_dir: Path):
             obj2faces.setdefault(int(oid), []).append(fid)
     obj2faces = {k: np.asarray(v, dtype=np.int32) for k, v in obj2faces.items()}
     return mesh, tri2obj, obj2faces
+
+
+def extract_floor_bbox(scan_dir: Path,
+                       verts: np.ndarray,
+                       tris: np.ndarray,
+                       obj2faces: Dict[int, np.ndarray]) -> Optional[Dict[str, float]]:
+    """Return the axis-aligned bounding box of all floor-labelled objects.
+
+    Reads the semantic segmentation file (``semseg.v2.json``) to identify
+    floor segments, then computes the AABB of their vertices.
+
+    Args:
+        scan_dir: Path to the individual scan directory.
+        verts: Mesh vertex positions, shape ``(V, 3)``.
+        tris: Mesh triangle indices, shape ``(F, 3)``.
+        obj2faces: Mapping from object ID to face index array.
+
+    Returns:
+        Dict with keys ``x_min, x_max, y_min, y_max, z_min, z_max``,
+        or ``None`` if the semseg file is missing or contains no floor.
+    """
+    semseg_path = scan_dir / "semseg.v2.json"
+    if not semseg_path.exists():
+        return None
+
+    groups = json.loads(semseg_path.read_text())["segGroups"]
+    floor_ids = {int(g["objectId"]) for g in groups
+                 if g.get("label", "").strip().lower() == "floor"}
+    if not floor_ids:
+        return None
+
+    face_lists = [obj2faces[oid] for oid in floor_ids if oid in obj2faces]
+    if not face_lists:
+        return None
+
+    floor_faces = np.concatenate(face_lists)
+    floor_vert_idx = np.unique(tris[floor_faces].ravel())
+    floor_verts = verts[floor_vert_idx]
+
+    return {
+        "x_min": float(floor_verts[:, 0].min()),
+        "x_max": float(floor_verts[:, 0].max()),
+        "y_min": float(floor_verts[:, 1].min()),
+        "y_max": float(floor_verts[:, 1].max()),
+        "z_min": float(floor_verts[:, 2].min()),
+        "z_max": float(floor_verts[:, 2].max()),
+    }
 
 
 def sample_grid(verts: np.ndarray, step: float, z_eye: float = 1.6):

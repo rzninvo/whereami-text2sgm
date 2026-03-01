@@ -13,6 +13,7 @@ defaults:
   - eval: default
   - inference: default
   - localization: default
+  - baseline: default
   - _self_
 
 # Weights & Biases logging mode.

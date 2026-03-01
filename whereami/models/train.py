@@ -13,7 +13,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from whereami.data_processing.scene_graph import SceneGraph
-from whereami.analysis.helper import get_matching_subgraph, calculate_overlap
+from whereami.analysis.helper import get_matching_subgraph
 from whereami.models.model_graph2graph import BigGNN
 from whereami.models.train_utils import cross_entropy, k_fold_by_scene
 
@@ -33,7 +33,7 @@ def format_to_latex(acc):
     return acc_string
 
 
-def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
+def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg, device='cuda'):
     """Runs one epoch of contrastive training over batched graph pairs.
 
     For each batch, computes pairwise cosine similarity and matching probability
@@ -60,8 +60,8 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
         skipped = 0
         total = 0
         for batch in batched_indices:
-            loss1 = torch.zeros((len(batch), len(batch))).to('cuda')
-            loss3 = torch.zeros((len(batch), len(batch))).to('cuda')
+            loss1 = torch.zeros((len(batch), len(batch))).to(device)
+            loss3 = torch.zeros((len(batch), len(batch))).to(device)
             for i in range(len(batch)):
                 for j in range(i, len(batch)):
                     total += 1
@@ -83,17 +83,17 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
                         loss3[i][j] = 0.5
                         loss3[j][i] = loss3[i][j]
                         continue
-                    x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to('cuda'),
-                                            torch.tensor(x_edge_idx, dtype=torch.int64).to('cuda'), torch.tensor(p_edge_idx, dtype=torch.int64).to('cuda'),
-                                            torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to('cuda'))
+                    x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to(device),
+                                            torch.tensor(x_edge_idx, dtype=torch.int64).to(device), torch.tensor(p_edge_idx, dtype=torch.int64).to(device),
+                                            torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to(device))
                     x_node_ft, x_edge_idx, x_edge_ft = None, None, None
 
                     loss1[i][j] = 1 - F.cosine_similarity(x_p, p_p, dim=0)
                     loss1[j][i] = loss1[i][j]
                     loss3[i][j] = m_p
                     loss3[j][i] = loss3[i][j]
-            loss1_t = (torch.ones((len(batch), len(batch))).to('cuda') - torch.eye(len(batch)).to('cuda')) * 2
-            loss3_t = torch.eye(len(batch)).to('cuda')
+            loss1_t = (torch.ones((len(batch), len(batch))).to(device) - torch.eye(len(batch)).to(device)) * 2
+            loss3_t = torch.eye(len(batch)).to(device)
 
             avg_mp = torch.diag(loss3).mean()
             avg_mn = (torch.sum(loss3) - torch.diag(loss3).sum()) / (len(batch) * (len(batch) - 1))
@@ -124,7 +124,7 @@ def train(model, optimizer, database_3dssg, dataset, batch_size, fold, cfg):
     return model
 
 
-def eval_loss(model, database_3dssg, dataset, fold, cfg):
+def eval_loss(model, database_3dssg, dataset, fold, cfg, device='cuda'):
     """Evaluates the model loss on a validation dataset.
 
     Computes contrastive loss (cosine similarity + matching probability)
@@ -159,8 +159,8 @@ def eval_loss(model, database_3dssg, dataset, fold, cfg):
             skipped = 0
             total = 0
             for batch in batched_indices:
-                loss1 = torch.zeros((len(batch), len(batch))).to('cuda')
-                loss3 = torch.zeros((len(batch), len(batch))).to('cuda')
+                loss1 = torch.zeros((len(batch), len(batch))).to(device)
+                loss3 = torch.zeros((len(batch), len(batch))).to(device)
                 for i in range(len(batch)):
                     for j in range(i, len(batch)):
                         total += 1
@@ -182,16 +182,16 @@ def eval_loss(model, database_3dssg, dataset, fold, cfg):
                             loss3[i][j] = 0.5
                             loss3[j][i] = loss3[i][j]
                             continue
-                        x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to('cuda'),
-                                                torch.tensor(x_edge_idx, dtype=torch.int64).to('cuda'), torch.tensor(p_edge_idx, dtype=torch.int64).to('cuda'),
-                                                torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to('cuda'))
+                        x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to(device),
+                                                torch.tensor(x_edge_idx, dtype=torch.int64).to(device), torch.tensor(p_edge_idx, dtype=torch.int64).to(device),
+                                                torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to(device))
                         x_node_ft, x_edge_idx, x_edge_ft = None, None, None
                         loss1[i][j] = 1 - F.cosine_similarity(x_p, p_p, dim=0)
                         loss1[j][i] = loss1[i][j]
                         loss3[i][j] = m_p
                         loss3[j][i] = loss3[i][j]
-                loss1_t = (torch.ones((len(batch), len(batch))).to('cuda') - torch.eye(len(batch)).to('cuda')) * 2
-                loss3_t = torch.eye(len(batch)).to('cuda')
+                loss1_t = (torch.ones((len(batch), len(batch))).to(device) - torch.eye(len(batch)).to(device)) * 2
+                loss3_t = torch.eye(len(batch)).to(device)
 
                 avg_mp = torch.diag(loss3).mean()
                 avg_mn = (torch.sum(loss3) - torch.diag(loss3).sum()) / (len(batch) * (len(batch) - 1))
@@ -228,7 +228,7 @@ def eval_loss(model, database_3dssg, dataset, fold, cfg):
     return torch.tensor(loss_across_batches).mean().item()
 
 
-def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_iter_count=None, out_of=None, valid_top_k=[1, 2, 3, 5], timer=None):
+def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_iter_count=None, out_of=None, valid_top_k=[1, 2, 3, 5], timer=None, device='cuda'):
     """Evaluates top-k retrieval accuracy by sampling scene subsets.
 
     For each evaluation iteration, samples ``out_of`` scenes, scores the query
@@ -299,9 +299,9 @@ def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_
                 p_node_ft, p_edge_idx, p_edge_ft = db_subgraph.to_pyg()
 
                 t1 = time.time()
-                x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to('cuda'),
-                                        torch.tensor(x_edge_idx, dtype=torch.int64).to('cuda'), torch.tensor(p_edge_idx, dtype=torch.int64).to('cuda'),
-                                        torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to('cuda'), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to('cuda'))
+                x_p, p_p, m_p = model(torch.tensor(np.array(x_node_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_node_ft), dtype=torch.float32).to(device),
+                                        torch.tensor(x_edge_idx, dtype=torch.int64).to(device), torch.tensor(p_edge_idx, dtype=torch.int64).to(device),
+                                        torch.tensor(np.array(x_edge_ft), dtype=torch.float32).to(device), torch.tensor(np.array(p_edge_ft), dtype=torch.float32).to(device))
                 if timer is not None:
                     timer.text2graph_text_embedding_matching_score_time.append(time.time() - t1)
                     timer.text2graph_text_embedding_matching_score_iter.append(1)
@@ -364,7 +364,7 @@ def eval_acc(model, database_3dssg, dataset, fold, cfg, mode='scanscribe', eval_
     return accuracy
 
 
-def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_size, entire_training_set, cfg):
+def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_size, entire_training_set, cfg, device='cuda'):
     """Trains the model with optional k-fold cross-validation.
 
     If ``entire_training_set`` is True, trains on all data without validation.
@@ -386,10 +386,10 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
     ckpt_dir = Path(cfg.paths.checkpoint_dir)
     if entire_training_set:
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
@@ -403,7 +403,8 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
                                dataset=dataset,
                                batch_size=batch_size,
                                fold=None,
-                               cfg=cfg)
+                               cfg=cfg,
+                               device=device)
             if epoch % 2 == 0:
                 torch.save(model.state_dict(), ckpt_dir / f'{cfg.train.model_name}_epoch_{epoch}_checkpoint.pt')
         return model
@@ -418,10 +419,10 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
         print(f'length of validation set in fold {fold}: {len(val_dataset)}')
 
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
 
         starting_epoch = 1
@@ -435,20 +436,23 @@ def train_with_cross_val(dataset, database_3dssg, model, folds, epochs, batch_si
                                dataset=train_dataset,
                                batch_size=batch_size,
                                fold=fold,
-                               cfg=cfg)
+                               cfg=cfg,
+                               device=device)
             if epoch % 2 == 0:
                 torch.save(model.state_dict(), ckpt_dir / f'{cfg.train.model_name}_epoch_{epoch}_checkpoint.pt')
             val_losses.append(eval_loss(model=model,
                                         database_3dssg=database_3dssg,
                                         dataset=val_dataset,
                                         fold=fold,
-                                        cfg=cfg))
+                                        cfg=cfg,
+                                        device=device))
             accs.append(eval_acc(model=model,
                                  database_3dssg=database_3dssg,
                                  dataset=val_dataset,
                                  fold=fold,
                                  cfg=cfg,
-                                 eval_iter_count=30))
+                                 eval_iter_count=30,
+                                 device=device))
             eval_info = {
                 'fold': fold,
                 'epoch': epoch,
@@ -469,11 +473,12 @@ def run_training(cfg: DictConfig) -> None:
     Args:
         cfg: Merged Hydra configuration.
     """
-    torch.cuda.empty_cache()
     device = cfg.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(torch.cuda.current_device())
+    if device != "cpu":
+        torch.cuda.empty_cache()
+        print(torch.cuda.current_device())
     random.seed(cfg.seed)
 
     if cfg.train.model_name is None:
@@ -591,10 +596,10 @@ def run_training(cfg: DictConfig) -> None:
 
     if cfg.train.training_with_cross_val:
         if cfg.train.continue_training:
-            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+            model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
             model_dict = torch.load(ckpt_dir / f'{cfg.train.continue_training_model}.pt', weights_only=False)
             model.load_state_dict(model_dict)
-        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to('cuda')
+        else: model = BigGNN(cfg.model.N, cfg.model.heads, cfg.model.embed_dim, cfg.model.dropout).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
         model = train_with_cross_val(database_3dssg=_3dssg_graphs,
                                         dataset=scanscribe_graphs,
@@ -603,7 +608,8 @@ def run_training(cfg: DictConfig) -> None:
                                         epochs=cfg.train.epoch,
                                         batch_size=cfg.train.batch_size,
                                         entire_training_set=cfg.train.entire_training_set,
-                                        cfg=cfg)
+                                        cfg=cfg,
+                                        device=device)
 
     ######### SAVE MODEL #########
     model_name = cfg.train.model_name
@@ -617,13 +623,15 @@ def run_training(cfg: DictConfig) -> None:
                                      dataset=list(scanscribe_graphs_test.values()),
                                      fold=None,
                                      cfg=cfg,
-                                     mode='scanscribe_test')
+                                     mode='scanscribe_test',
+                                     device=device)
     human_test_accuracy = eval_acc(model=model,
                                      database_3dssg=_3dssg_graphs,
                                      dataset=list(human_graphs_test.values()),
                                      fold=None,
                                      cfg=cfg,
-                                     mode='human_test')
+                                     mode='human_test',
+                                     device=device)
     t_end = time.perf_counter()
     print(f'Time elapsed in minutes: {(t_end - t_start) / 60}')
 

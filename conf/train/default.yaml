@@ -44,9 +44,6 @@ loss_ablation_m: false
 # Loss ablation: train with matching probability loss only (drop cosine loss).
 loss_ablation_c: false
 
-# Evaluate using cosine similarity only (ignore matching probability).
-eval_only_c: false
-
 # --- Loss weighting ---
 # When both losses are active (no ablation), the combined loss is:
 #   loss = (w_cosine * L_cosine + w_matching * L_matching) / (w_cosine + w_matching)

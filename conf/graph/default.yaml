@@ -25,7 +25,3 @@ dbscan_eps: 0.5
 
 # DBSCAN minimum number of samples per cluster.
 dbscan_min_samples: 1
-
-# Cosine similarity threshold for nodes_features_similar() and calculate_overlap().
-# Two nodes are considered "similar" if their cosine similarity exceeds this value.
-similarity_threshold: 0.85

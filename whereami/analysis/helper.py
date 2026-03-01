@@ -1,67 +1,9 @@
-"""Helper functions for scene graph analysis: similarity, loading, and subgraph matching."""
+"""Helper functions for scene graph analysis: subgraph matching via DBSCAN."""
 
-import torch
 import numpy as np
-from numpy.linalg import norm
 from sklearn.cluster import DBSCAN
-import copy
 
 from whereami.data_processing.scene_graph import SceneGraph
-
-from whereami.utils.utils import _get_nlp
-
-
-def np_cosine_sim(a, b):
-    """Computes cosine similarity between two numpy vectors.
-
-    Args:
-        a: First vector.
-        b: Second vector.
-
-    Returns:
-        Cosine similarity score in [-1, 1].
-    """
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-
-def nodes_features_similar(node1, node2, sim_thr=0.85):
-    """Checks whether two nodes have similar feature vectors.
-
-    Args:
-        node1: First Node object.
-        node2: Second Node object.
-        sim_thr: Cosine similarity threshold.
-
-    Returns:
-        True if similarity exceeds the threshold.
-    """
-    return np_cosine_sim(node1.features, node2.features) > sim_thr
-
-
-def load_scene_graphs(path):
-    """Loads scene graphs from a ``.pt`` file.
-
-    Args:
-        path: Path to the serialized graph file.
-
-    Returns:
-        Dictionary of loaded scene graphs.
-    """
-    graphs = torch.load(path, weights_only=False)
-    return graphs
-
-
-def load_text_graphs(path):
-    """Loads text graphs from a ``.pt`` file.
-
-    Args:
-        path: Path to the serialized graph file.
-
-    Returns:
-        Dictionary of loaded text graphs.
-    """
-    graphs = torch.load(path, weights_only=False)
-    return graphs
 
 
 def combine_node_features(graph1, graph2):
@@ -135,28 +77,3 @@ def get_matching_subgraph(graph1, graph2, dbscan_eps=0.5, dbscan_min_samples=1):
     return subgraph1, subgraph2
 
 
-def calculate_overlap(graph1, graph2, sim_thr=0.95):
-    """Calculates the fraction of graph1's nodes that have a similar match in graph2.
-
-    Args:
-        graph1: First SceneGraph.
-        graph2: Second SceneGraph.
-        sim_thr: Cosine similarity threshold for considering a node match.
-
-    Returns:
-        Overlap ratio in [0, 1], or 0 if either graph is None.
-    """
-    if graph1 is None or graph2 is None:
-        return 0
-    overlap = 0
-    for node1id in graph1.nodes:
-        node1 = graph1.nodes[node1id]
-        found_match = False
-        for node2id in graph2.nodes:
-            node2 = graph2.nodes[node2id]
-            if nodes_features_similar(node1, node2, sim_thr):
-                found_match = True
-                break
-        if found_match:
-            overlap += 1
-    return overlap / len(graph1.nodes)

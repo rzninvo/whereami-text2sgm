@@ -105,8 +105,9 @@ class BigGNN(nn.Module):
             edge_index_2_cross, edge_attr_2_cross = make_cross_graph(x_2.shape, x_1.shape)
             x_1_cross = torch.cat((x_1, x_2), dim=0)
             x_2_cross = torch.cat((x_2, x_1), dim=0)
-            x_1_cross = self.TCALayers[i](x_1_cross.to('cuda'), edge_index_1_cross.to('cuda'), edge_attr_1_cross.to('cuda'))
-            x_2_cross = self.GCALayers[i](x_2_cross.to('cuda'), edge_index_2_cross.to('cuda'), edge_attr_2_cross.to('cuda'))
+            dev = x_1.device
+            x_1_cross = self.TCALayers[i](x_1_cross.to(dev), edge_index_1_cross.to(dev), edge_attr_1_cross.to(dev))
+            x_2_cross = self.GCALayers[i](x_2_cross.to(dev), edge_index_2_cross.to(dev), edge_attr_2_cross.to(dev))
             x_1 = x_1_cross[:len_x_1]
             x_2 = x_2_cross[:len_x_2]
 
